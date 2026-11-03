@@ -1,0 +1,5 @@
+<!doctype html>
+<html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>로그인 · 나의 재무</title><link rel="stylesheet" href="{{ url_for('static', filename='app.css') }}"></head>
+<body class="login-page"><main class="login-card"><div class="brand-mark">F</div><p class="eyebrow">PERSONAL FINANCE</p><h1>나의 재무를<br>한눈에, 차분하게.</h1><p class="muted">나만의 자산과 예산을 관리하는 공간</p>
+{% if error %}<p class="notice error" role="alert">{{ error }}</p>{% endif %}
+<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label>아이디<input name="username" autocomplete="username" required autofocus maxlength="100"></label><label>비밀번호<input name="password" type="password" autocomplete="current-password" required maxlength="200"></label><button type="submit" class="primary wide">로그인</button></form><p class="caption">개인 전용 · 안전한 세션으로 연결합니다</p></main></body></html>

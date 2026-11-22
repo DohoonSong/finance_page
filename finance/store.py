@@ -6,14 +6,18 @@ writes can be replayed after ambiguous timeouts without duplicate append rows.
 import copy
 import hashlib
 import json
+import logging
 import sqlite3
 import time
 from contextlib import contextmanager
 from pathlib import Path
 
 from filelock import FileLock, Timeout
+from gspread.exceptions import APIError
 
 from .schema import SCHEMA, AppError
+
+logger = logging.getLogger(__name__)
 
 
 def column(n):
@@ -123,18 +127,36 @@ class Repository:
             for operations in json.loads(plan):
                 try:
                     self.backend.apply(operations)
+                except APIError as exc:
+                    status = exc.response.status_code
+                    logger.warning('Sheets write rejected request_id=%s http_status=%s', rid, status)
+                    if status == 403:
+                        self._write_pending('Google Sheets에서 쓰기를 거부했습니다. 서비스 계정의 편집자 권한과 시트 보호 설정을 확인하세요.')
+                    if status == 400:
+                        self._write_pending('Google Sheets에서 저장 범위 또는 입력값을 거부했습니다. 서버 로그에서 요청 ID를 확인하세요.')
+                    self._write_pending()
+                except Exception:
+                    logger.warning('Sheets write failed request_id=%s', rid)
+                    self._write_pending()
+                try:
                     raw = self.raw()
-                    for op in operations:
-                        actual = raw[op['tab']][op['row'] - 1] if len(raw[op['tab']]) >= op['row'] else []
-                        actual = actual + [''] * (len(op['values']) - len(actual))
-                        if actual != op['values']:
-                            raise ValueError('Read-back differs from journal')
-                except Exception as exc:
-                    self.cache = None
-                    raise AppError('저장 확인에 실패했습니다. 같은 request-id로 재시도하면 복구합니다.', 503, 'write_pending') from exc
+                except AppError as exc:
+                    logger.warning('Sheets read-back failed request_id=%s code=%s', rid, exc.code)
+                    self._write_pending('저장 후 Google Sheets를 다시 읽지 못했습니다. 연결과 시트 헤더를 확인하세요.')
+                for op in operations:
+                    tab, row, expected = op['tab'], op['row'], op['values']
+                    actual = raw[tab][row - 1][:len(expected)] if len(raw[tab]) >= row else []
+                    actual += [''] * (len(expected) - len(actual))
+                    if actual != expected:
+                        logger.warning('Sheets read-back mismatch request_id=%s tab=%s row=%s', rid, tab, row)
+                        self._write_pending('Google Sheets의 저장값이 요청과 일치하지 않습니다. 서버 로그에서 요청 ID를 확인하세요.')
             with self.db() as db:
                 db.execute('UPDATE requests SET done=1 WHERE id=?', (rid,))
             self.cache = None
+
+    def _write_pending(self, message='저장 확인에 실패했습니다. 같은 request-id로 재시도하면 복구합니다.'):
+        self.cache = None
+        raise AppError(message, 503, 'write_pending') from None
 
     def read(self, fresh=False):
         with self.locked():

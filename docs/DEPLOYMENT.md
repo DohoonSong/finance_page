@@ -72,3 +72,16 @@ PythonAnywhere의 요금제/네트워크 정책에 따라 `oauth2.googleapis.com
 비밀번호 변경은 새 해시 설정과 Reload로 적용합니다. 기존 세션도 모두 무효화하려면 `SECRET_KEY`도 교체합니다. 생산 환경에서는 debug/reloader를 켜지 않습니다.
 
 공식 참고: [PythonAnywhere Flask 설정](https://help.pythonanywhere.com/pages/Flask/), [Google Sheets RAW 값 쓰기](https://developers.google.com/workspace/sheets/api/guides/values), [gspread API](https://docs.gspread.org/en/latest/api/models/worksheet.html).
+
+## 설정 화면에서 코드 업데이트
+
+최초 1회는 Bash에서 코드를 업데이트하고 Web 탭에서 Reload합니다. PythonAnywhere **Account → API token**에서 발급한 토큰을 서버의 `.env`에만 저장합니다.
+
+```dotenv
+DEPLOY_UPDATE_BRANCH=feat/finance-category-filters
+PYTHONANYWHERE_API_TOKEN='발급한 API 토큰'
+```
+
+운영 서버가 `main`으로 전환되면 이 값도 `main`으로 바꿉니다. 두 설정을 저장하고 Reload한 뒤 로그인하면 설정 탭에서 **업데이트 및 Reload** 버튼을 사용할 수 있습니다. 확인창에서 취소하면 서버에 요청을 보내지 않습니다.
+
+버튼은 현재 체크아웃된 지정 브랜치에서 GitHub의 최신 커밋으로 빠르게 전진할 수 있을 때만 코드를 반영합니다. 작업 폴더에 미커밋 변경이 있거나 원격과 분기한 커밋이 있으면 Bash에서 해결합니다. Git 업데이트에 성공하면 PythonAnywhere API로 Reload를 요청합니다. API가 Reload를 거부하더라도 가져온 코드는 서버에 있으므로 Web 탭에서 Reload할 수 있습니다. 의존성 설치와 환경설정 변경이 필요한 릴리스에는 Bash 배포 절차를 사용합니다.

@@ -5,6 +5,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 from flask import Blueprint, current_app, g, jsonify, request
 from .auth import login_required
+from .deployment import update_branch
 from .schema import AppError
 from .services import (CATEGORY_PREFIX, CATEGORY_TABLES, TOSS_CATEGORIES, assets_summary, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, month_end, month_value, now, portfolio_summary, reopen, write_record)
 from .store import operation
@@ -161,7 +162,7 @@ def settings_version(rows):
 def settings():
     if request.method == 'GET':
         rows = [row for row in repository().read()['settings'] if not row['key'].startswith(CATEGORY_PREFIX)]
-        return ok({'items': rows, 'version': settings_version(rows), 'writes_enabled': current_app.config['WRITES_ENABLED'], 'backend': current_app.config['DATA_BACKEND'], 'timezone': 'Asia/Seoul', 'base_currency': 'KRW'})
+        return ok({'items': rows, 'version': settings_version(rows), 'writes_enabled': current_app.config['WRITES_ENABLED'], 'backend': current_app.config['DATA_BACKEND'], 'timezone': 'Asia/Seoul', 'base_currency': 'KRW', 'update_branch': update_branch()})
     value = body(('expected_version', 'display_name'))
     name = value.get('display_name')
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:

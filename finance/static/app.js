@@ -189,6 +189,9 @@ async function render(focusFilter=null) {
    const [rows,s]=await Promise.all([getCollection('accounts'),api('/settings')]);settings=s;
    html=panel('계좌 관리',table(rows,['name','type','institution','currency','active'],'accounts'),button('accounts'));
    html+=panel('데이터와 표시 설정',table(s.items,['key','value','description']),`<button data-action="display-name" ${writable?'':'disabled'}>표시 이름</button><a href="/api/v1/backup">JSON 백업 내려받기 ↗</a>`);
+   html+=panel('서버 업데이트',
+    `<p class="section-note">${s.update_branch?esc(s.update_branch)+' 브랜치의 최신 코드를 가져온 뒤 웹앱을 다시 시작합니다.':'PythonAnywhere에서 업데이트 설정을 활성화하면 사용할 수 있습니다.'}</p>`,
+    `<button data-action="deploy-update" ${s.update_branch?'':'disabled'}>업데이트 및 Reload</button>`);
    html+=panel('분류 기준과 보안','<p class="section-note">예산 흐름: 수입 / 소비 / 투자 배분 / 계좌 이체 / 원금 상환<br>자산 분류: 현금 / 예금 / 부동산 / 기타<br>기준 통화: KRW · 표시 시간대: Asia/Seoul<br>비밀번호 변경: 서버에서 password-hash 명령으로 새 해시를 생성하고 환경 설정을 변경하세요.<br>재무 자료는 외부로 전송되는 차트 라이브러리 없이 이 화면에서 표시합니다.</p>');
   }
   const preferences=page==='settings'?settings:await api('/settings');
@@ -260,6 +263,17 @@ workspace.addEventListener('click',async e=>{
   else if(el.dataset.edit) await openEditor(el.dataset.edit,el.dataset.id);
   else if(el.dataset.delete){const row=collections.budgets.find(r=>r.budget_id===el.dataset.delete);if(confirm(`“${row.item}” 예산을 삭제할까요?`)){await api('/budgets/'+row.budget_id,'DELETE',{expected_version:Number(row.version)});message('삭제했습니다.');await render();}}
   else if(el.dataset.action==='copy'){const source=prompt('복사할 원본 월 (YYYY-MM)');if(source){await api('/budgets/'+monthInput.value+'/copy','POST',{source_month:source,expected_version:0});message('예산을 복사했습니다.');await render();}}
+  else if(el.dataset.action==='deploy-update'){
+   if (!confirm(`${settings.update_branch}의 최신 코드로 업데이트하고 웹앱을 다시 시작할까요? 잠시 접속이 중단될 수 있습니다.`)) return;
+   try {
+    const result=await api('/deployment-update','POST',{confirm:true});
+    message(`커밋 ${result.commit}의 Reload를 요청했습니다. 잠시 후 브라우저를 새로고침하세요.`);
+   } catch (err) {
+    message(err instanceof SyntaxError || err.message.startsWith('연결을 확인')
+     ? '웹앱이 응답하기 전에 다시 시작됐을 수 있습니다. 잠시 후 새로고침해 확인하세요.'
+     : err.message,true);
+   }
+  }
   else if(el.dataset.action==='display-name'){const name=prompt('표시 이름',settings.items.find(r=>r.key==='display_name')?.value || '나의 재무');if(name){await api('/settings','PATCH',{display_name:name,expected_version:settings.version});message('표시 이름을 저장했습니다.');await render();}}
   else if(el.dataset.action==='preview'){closingPreview=await api('/closings/'+monthInput.value+'/preview','POST',{expected_version:0});$('#close-preview').innerHTML=table([closingPreview.summary],['assets_total','liabilities_total','net_worth','budget_balance','portfolio_profit'])+closingPreview.blockers.map(s=>`<p class="error">${esc(s)}</p>`).join('')+`<p class="caption">상세 내역 ${closingPreview.details.length}개 · 리비전 ${closingPreview.revision}</p><button class="primary" data-action="finalize" ${closingPreview.can_finalize?'':'disabled'}>검토한 내용으로 마감 확정</button>`;}
   else if(el.dataset.action==='finalize'&&closingPreview){await api('/closings/'+closingPreview.month+'/finalize','POST',{expected_version:closingPreview.revision,data_hash:closingPreview.data_hash});message('월마감을 완료했습니다.');await render();}

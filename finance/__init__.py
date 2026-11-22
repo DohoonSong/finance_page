@@ -25,8 +25,18 @@ def create_app(config=None, backend=None):
         if production:
             raise RuntimeError('Production requires SECRET_KEY')
         app.config['SECRET_KEY'] = secrets.token_hex(32)
-    if production and (len(app.config['SECRET_KEY']) < 32 or not app.config['ADMIN_PASSWORD_HASH'] or not app.config['SESSION_COOKIE_SECURE'] or app.config['DATA_BACKEND'] != 'sheets'):
-        raise RuntimeError('Production requires strong secret, password hash, HTTPS cookies, and Sheets backend')
+    if production:
+        failures = []
+        if not isinstance(app.config['SECRET_KEY'], str) or len(app.config['SECRET_KEY']) < 32:
+            failures.append('SECRET_KEY (minimum 32 characters)')
+        if not app.config['ADMIN_PASSWORD_HASH']:
+            failures.append('ADMIN_PASSWORD_HASH')
+        if app.config['SESSION_COOKIE_SECURE'] is not True:
+            failures.append('SESSION_COOKIE_SECURE=true')
+        if app.config['DATA_BACKEND'] != 'sheets':
+            failures.append('DATA_BACKEND=sheets')
+        if failures:
+            raise RuntimeError('Invalid production configuration: ' + ', '.join(failures))
     if app.config['DATA_BACKEND'] not in ('sheets', 'memory'):
         raise RuntimeError('Unknown DATA_BACKEND')
     if backend is None:

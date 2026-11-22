@@ -11,8 +11,13 @@ const monthInput = $('#month');
 monthInput.value = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul',year:'numeric',month:'2-digit'}).format(new Date());
 const today = () => new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul'}).format(new Date());
 const money = (n, c='KRW') => `${Number(n || 0).toLocaleString('ko-KR')} ${c === 'KRW' ? '원' : c}`;
+const annualRateFormat = new Intl.NumberFormat('ko-KR',{style:'percent',maximumFractionDigits:20});
+function shiftRate(value, places) {
+ const [digits,exponent='0']=String(value).toLowerCase().split('e');
+ return Number(digits+'e'+(Number(exponent)+places));
+}
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const labels = {name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (소수)',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
+const labels = {name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
 const words = {income:'수입',expense:'소비',investment:'투자 배분',transfer:'계좌 이체',debt_principal:'원금 상환',bank:'은행',cash:'현금',brokerage:'증권',retirement:'퇴직연금',other:'기타',deposit:'예금',property:'부동산',open:'진행 중',preparing:'마감 중',closed:'마감',true:'사용',false:'미사용'};
 const numeric = new Set(['amount','day','original_principal','annual_rate','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit']);
 const moneyKeys = new Set(['amount','original_principal','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit','net_worth','assets_total','liabilities_total','unrealized_profit','dividend_total','realized_profit','total_profit','budget_balance','portfolio_profit']);
@@ -51,6 +56,7 @@ const empty = (text='아직 기록이 없습니다. 첫 항목을 추가해 시�
 function panel(title, content, actions='', description='') { return `<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${description?`<p class="caption">${esc(description)}</p>`:''}</div><div class="actions">${actions}</div></div>${content}</section>`; }
 function card(title, value, hint, highlight=false) { return `<article class="card ${highlight?'highlight':''}"><p class="card-label">${esc(title)}</p><div class="metric">${esc(value)}</div><span class="caption">${esc(hint)}</span></article>`; }
 function display(row,key) {
+ if (key==='annual_rate') return row[key] == null || row[key]==='' ? '—' : annualRateFormat.format(row[key]);
  if (moneyKeys.has(key)) return money(row[key],row.currency || 'KRW');
  if (key==='closed_at') return row[key] ? new Date(row[key]).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}) : '—';
  if (key==='account_id') return collections.accounts?.find(a=>a.account_id===row[key])?.name || row[key];
@@ -157,7 +163,7 @@ async function render(focusFilter=null) {
    html=`<div class="cards">${card('순자산',money(k.net_worth),'선택 월말 기준',true)}${card('일반 자산 + 투자',money(k.assets_total),'KRW')}${card('대출 잔액',money(k.liabilities_total),'KRW')}${card('등록 자산',items.length+'개','투자 계좌는 보유종목으로 관리')}</div>`;
    html+=panel('자산 항목',table(items,['name','account_id','category','active'],'asset-items'),button('asset-items'));
    html+=panel('자산 잔액 기록',table(snaps,['date','asset_id','amount','note'],'asset-snapshots'),button('asset-snapshots'));
-   html+=panel('대출',table(loans,['name','original_principal','annual_rate','maturity_date'],'liabilities'),button('liabilities'),'대출은 KRW로 관리합니다. 연이율 예: 4.012% → 0.04012');
+   html+=panel('대출',table(loans,['name','original_principal','annual_rate','maturity_date'],'liabilities'),button('liabilities'),'대출은 KRW로 관리합니다. 연이율은 % 단위로 입력하세요.');
    html+=panel('대출 잔액 기록',table(debts,['date','loan_id','balance'],'liability-snapshots'),button('liability-snapshots'));
   } else if(page==='investments') {
    const [accounts, holdings, gains]=await Promise.all([getCollection('accounts'),getCollection('holdings'),getCollection('realized-gains')]);
@@ -200,6 +206,7 @@ async function openEditor(resource, id) {
  $('#editor-fields').innerHTML=schemas[resource].map(key=>{
   if(key==='investment_category') return `<label hidden>투자 분류<select name="investment_category" disabled>${selectOptions(tossCategories.map(c=>[c,c]),record?.investment_category ?? '','미분류')}</select></label>`;
   let value=record?.[key] ?? ({active:true,currency:investment?(accountById(filters.account)?.currency || 'KRW'):'KRW',account_id:investment?filters.account:'',category:resource==='budgets'?(filters.budget ?? ''):'',month:monthInput.value,start_month:monthInput.value,date:today(),payment_date:today(),trade_date:today(),start_date:today(),tax_amount:0}[key] ?? '');
+  if (key==='annual_rate' && value!=='') value=shiftRate(value,2);
   let choices=key==='type'?['bank','cash','brokerage','retirement','other']:key==='currency'?['KRW','USD']:key==='active'?['true','false']:key==='flow_type'?['income','expense','investment','transfer','debt_principal']:key==='category'&&resource==='asset-items'?['cash','deposit','property','other']:null;
   let options=choices?.map(c=>[c,words[c] || c]);
   const fk={account_id:'accounts',asset_id:'asset-items',loan_id:'liabilities'}[key];
@@ -207,7 +214,7 @@ async function openEditor(resource, id) {
   const optional=['note','institution','end_month'].includes(key), required=optional?'':'required';
   let field;
   if(options)field=`<select name="${key}" ${required}>${fk?'<option value="">선택하세요</option>':''}${options.map(([v,label])=>`<option value="${esc(v)}" ${String(value)===String(v)?'selected':''}>${esc(label)}</option>`).join('')}</select>`;
-  else {const type=numeric.has(key)?'number':key.includes('month')?'month':(key==='date'||key.endsWith('_date'))?'date':'text';field=`<input name="${key}" type="${type}" value="${esc(value)}" ${required} ${type==='number'?`step="${key==='annual_rate'?'any':'1'}" ${key==='profit'?'':'min="0"'}`:''} ${type==='text'?`maxlength="${key==='note'?1000:200}"`:''}>`;}
+  else {const type=numeric.has(key)?'number':key.includes('month')?'month':(key==='date'||key.endsWith('_date'))?'date':'text';field=`<input name="${key}" type="${type}" value="${esc(value)}" ${required} ${type==='number'?`step="${key==='annual_rate'?'any':'1'}" ${key==='profit'?'':'min="0"'} ${key==='annual_rate'?'max="100"':''}`:''} ${type==='text'?`maxlength="${key==='note'?1000:200}"`:''}>`;}
   return `<label>${esc(labels[key] || key)}${field}</label>`;
  }).join('');
  if(investment) {
@@ -227,6 +234,11 @@ $('#editor-close').onclick=$('#editor-cancel').onclick=()=>$('#editor').close();
 $('#editor-form').addEventListener('submit',async e=>{
  e.preventDefault();const save=$('#editor-save');save.disabled=true;$('#editor-error').textContent='';
  try {const data=Object.fromEntries(new FormData(e.target));for(const k in data){if(numeric.has(k))data[k]=Number(data[k]);if(k==='active')data[k]=data[k]==='true';}data.expected_version=editor.record?Number(editor.record.version):0;
+  if ('annual_rate' in data) {
+   const original=editor.record?.annual_rate;
+   data.annual_rate=original != null && original!=='' && data.annual_rate===shiftRate(original,2)
+    ? Number(original) : shiftRate(data.annual_rate,-2);
+  }
   await api('/'+editor.resource+(editor.record?'/'+editor.record[idKeys[editor.resource]]:''),editor.record?'PATCH':'POST',data);
   $('#editor').close();message('저장했습니다.');await render();
  }catch(err){$('#editor-error').textContent=err.message;}finally{save.disabled=false;}

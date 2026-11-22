@@ -4,15 +4,21 @@
 @media(max-width:1100px){.sidebar{width:200px;padding:25px 14px}main#main{margin-left:200px}.content{padding:27px}.cards{grid-template-columns:repeat(2,minmax(0,1fr))}.columns{grid-template-columns:1fr}.topbar{padding:0 27px}}
 @media(max-width:700px){.sidebar{position:static;width:auto;padding:18px 18px 0}.brand{font-size:16px}.brand-mark{width:32px;height:32px}.nav-label,.sidebar-bottom{display:none}.sidebar nav{display:flex;overflow:auto;gap:5px;margin-top:16px}.nav-link{white-space:nowrap;font-size:12px;padding:12px 14px}.nav-dot{display:none}main#main{margin:0}.topbar{height:50px;padding:0 20px}.content{padding:24px 17px}.page-heading{align-items:flex-start;gap:10px}h1{font-size:24px}.page-heading .muted{font-size:11px}.month-picker{min-width:154px;max-width:154px}.mobile-logout{display:block}.mobile-logout button{font-size:11px;padding:5px}.cards{gap:10px}.card{padding:18px 15px}.metric{font-size:21px}.card-label{font-size:11px;margin-bottom:14px}.panel{padding:20px 15px}.panel-head{align-items:flex-start;flex-wrap:wrap}.form-grid{grid-template-columns:1fr}.bar-row{grid-template-columns:62px 1fr 85px;gap:9px}footer{flex-wrap:wrap}.eyebrow{font-size:8px;letter-spacing:1.4px}dialog{padding:22px}.login-card{padding:30px}}
 
-.record-filters {
+.record-filters, .budget-filters {
  display: flex;
  flex-wrap: wrap;
  gap: 1rem;
  margin-bottom: 1rem;
 }
 
-.record-filters label, .actions label:has([data-filter]) {
+.record-filters label {
  display: flex;
  align-items: center;
  gap: .5rem;
+}
+
+.budget-filters button[aria-pressed="true"] {
+ background: var(--soft);
+ border-color: var(--accent);
+ color: var(--accent);
 }

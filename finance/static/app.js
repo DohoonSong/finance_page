@@ -3,7 +3,7 @@ const $ = (s, root = document) => root.querySelector(s);
 const workspace = $('#workspace');
 const page = document.body.dataset.page;
 const tossCategories = JSON.parse(document.body.dataset.tossCategories);
-const filters = {budget:'', account:'', category:''};
+const filters = {budget:null, account:'', category:''};
 const writable = document.body.dataset.writes === 'true';
 if (['investments','settings'].includes(page)) $('.month-picker').hidden=true;
 const csrf = $('meta[name="csrf-token"]').content;
@@ -104,6 +104,25 @@ function filteredInvestments(rows) {
  return rows.filter(row=>(!filters.account || row.account_id===filters.account)
   && (!filters.category || row.investment_category===filters.category));
 }
+function budgetCategoryTotals(rows) {
+ const totals=new Map();
+ for (const row of rows) {
+  const category=row.category || '';
+  totals.set(category,(totals.get(category) ?? 0)+Number(row.amount));
+ }
+ return [...totals].sort(([a],[b])=>a.localeCompare(b,'ko'));
+}
+function budgetFilterButtons(categories) {
+ if (!categories.length) return '';
+ const choices=[[null,'전체'],...categories.map(([category])=>[category,category || '미분류'])];
+ return `<div class="budget-filters" role="group" aria-label="상세 예산 분류">${choices.map(([value,label])=>
+  `<button type="button" data-budget-filter="${value===null?'all':'category'}" value="${esc(value)}" aria-pressed="${filters.budget===value}">${esc(label)}</button>`
+ ).join('')}</div>`;
+}
+function budgetDetailTable(rows) {
+ const visible=filters.budget===null?rows:rows.filter(row=>(row.category || '')===filters.budget);
+ return table(visible,['category','item','flow_type','amount','note'],'budgets');
+}
 async function render(focusFilter=null) {
  const sequence=++loadSequence;
  $('#loading').hidden=false;
@@ -121,16 +140,16 @@ async function render(focusFilter=null) {
    if(foreign.length) html+=panel('외화 자산',table(foreign.map(([currency,v])=>({currency,...v})),['currency','assets_total','net_worth']),'','KRW 총액에 합산하지 않습니다.');
    html+=panel('투자 현황',table(d.portfolio,['name','currency','market_value','total_profit']),'<a href="/investments">투자 관리 ↗</a>');
   } else if(page==='budgets') {
-   const [rows, recurring]=await Promise.all([getCollection('budgets','?month='+month),getCollection('recurring-items')]);
+   const [rows, recurring, summary]=await Promise.all([
+    getCollection('budgets','?month='+month),getCollection('recurring-items'),api('/budget-summary?month='+month),
+   ]);
    if (sequence!==loadSequence) return;
-   const categories=[...new Set(rows.map(row=>row.category).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
-   if (!categories.includes(filters.budget)) filters.budget='';
-   const query=new URLSearchParams({month});
-   if (filters.budget) query.set('category',filters.budget);
-   const visible=filters.budget?rows.filter(row=>row.category===filters.budget):rows;
-   const summary=await api('/budget-summary?'+query);
+   const categories=budgetCategoryTotals(rows);
+   if (!categories.some(([category])=>category===filters.budget)) filters.budget=null;
    html=`<div class="cards">${card('수입',money(summary.income),'월 예산')}${card('소비',money(summary.expense),'투자 및 원금 상환 제외')}${card('투자 배분',money(summary.investment),'자산으로 이동하는 금액')}${card('예산 잔액',money(summary.budget_balance),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
-   html+=panel('월별 예산 항목',table(visible,['category','item','flow_type','amount','note'],'budgets'),`${filterSelect('budget','분류',categories.map(c=>[c,c]),'전체 분류')}<button data-action="copy" ${writable?'':'disabled'}>다른 월에서 복사</button>${button('budgets')}`);
+   html+=panel('월별 예산 항목',table(categories.map(([category,amount])=>({category:category || '미분류',amount})),['category','amount']));
+   html+=panel('상세 예산 항목',budgetFilterButtons(categories)+`<div id="budget-details">${budgetDetailTable(rows)}</div>`,
+    `<button data-action="copy" ${writable?'':'disabled'}>다른 월에서 복사</button>${button('budgets')}`);
    html+=panel('반복 예산 템플릿',table(recurring,['item','flow_type','day','amount','start_month','end_month','active'],'recurring-items'),button('recurring-items'),'반복 항목은 템플릿으로 저장됩니다. 월 예산에는 자동으로 더하지 않습니다.');
   } else if(page==='assets') {
    const [accounts, items, loans, snaps, debts, summary]=await Promise.all([getCollection('accounts'),getCollection('asset-items'),getCollection('liabilities'),getCollection('asset-snapshots'),getCollection('liability-snapshots'),api('/assets?date='+month+'-'+new Date(Number(year),Number(month.slice(5)),0).getDate())]);
@@ -180,7 +199,7 @@ async function openEditor(resource, id) {
  const investment=schemas[resource].includes('investment_category');
  $('#editor-fields').innerHTML=schemas[resource].map(key=>{
   if(key==='investment_category') return `<label hidden>투자 분류<select name="investment_category" disabled>${selectOptions(tossCategories.map(c=>[c,c]),record?.investment_category ?? '','미분류')}</select></label>`;
-  let value=record?.[key] ?? ({active:true,currency:investment?(accountById(filters.account)?.currency || 'KRW'):'KRW',account_id:investment?filters.account:'',category:resource==='budgets'?filters.budget:'',month:monthInput.value,start_month:monthInput.value,date:today(),payment_date:today(),trade_date:today(),start_date:today(),tax_amount:0}[key] ?? '');
+  let value=record?.[key] ?? ({active:true,currency:investment?(accountById(filters.account)?.currency || 'KRW'):'KRW',account_id:investment?filters.account:'',category:resource==='budgets'?(filters.budget ?? ''):'',month:monthInput.value,start_month:monthInput.value,date:today(),payment_date:today(),trade_date:today(),start_date:today(),tax_amount:0}[key] ?? '');
   let choices=key==='type'?['bank','cash','brokerage','retirement','other']:key==='currency'?['KRW','USD']:key==='active'?['true','false']:key==='flow_type'?['income','expense','investment','transfer','debt_principal']:key==='category'&&resource==='asset-items'?['cash','deposit','property','other']:null;
   let options=choices?.map(c=>[c,words[c] || c]);
   const fk={account_id:'accounts',asset_id:'asset-items',loan_id:'liabilities'}[key];
@@ -214,6 +233,15 @@ $('#editor-form').addEventListener('submit',async e=>{
 });
 workspace.addEventListener('click',async e=>{
  const el=e.target.closest('button');if(!el || el.disabled)return;
+ if (el.dataset.budgetFilter) {
+  if (workspace.hasAttribute('aria-busy')) return;
+  filters.budget=el.dataset.budgetFilter==='all'?null:el.value;
+  for (const filter of workspace.querySelectorAll('[data-budget-filter]')) {
+   filter.setAttribute('aria-pressed',String(filter===el));
+  }
+  $('#budget-details').innerHTML=budgetDetailTable(collections.budgets);
+  return;
+ }
  el.disabled=true;
  try {
   if(el.dataset.add) await openEditor(el.dataset.add);

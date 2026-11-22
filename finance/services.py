@@ -13,6 +13,37 @@ from .schema import AppError, SCHEMA
 from .store import operation, row_for
 
 
+TOSS_CATEGORIES = ('기타주식', '미국배당주', '워렌버핏', '주간배당', '테크빅', 'ETF', '켄피셔')
+CATEGORY_TABLES = ('holdings', 'dividends', 'realized_gains')
+CATEGORY_PREFIX = 'investment_category/'
+
+
+def is_toss(account):
+    return any('토스' in str(account[field]) or 'toss' in str(account[field]).lower()
+               for field in ('name', 'institution'))
+
+
+def category_key(table, identifier):
+    return f'{CATEGORY_PREFIX}{table}/{identifier}'
+
+
+def category_values(data):
+    return {row['key']: row['value'] for row in data['settings']
+            if row['key'].startswith(CATEGORY_PREFIX)}
+
+
+def investment_rows(data, table):
+    categories = category_values(data)
+    toss_ids = {row['account_id'] for row in data['accounts'] if is_toss(row)}
+    return [{**row, 'investment_category': categories.get(category_key(table, row[SCHEMA[table][0]]), '')
+             if row['account_id'] in toss_ids else ''} for row in data[table]]
+
+
+def matches_investment(row, account_id, category):
+    return (not account_id or row['account_id'] == account_id) and (
+        not category or row.get('investment_category') == category)
+
+
 def now():
     return datetime.now(timezone.utc).isoformat()
 
@@ -55,20 +86,23 @@ def latest(rows, keys, cutoff, date_key='date'):
     return list(found.values())
 
 
-def budget_summary(data, month):
+def budget_summary(data, month, category=None):
     totals = {k: 0 for k in ('income', 'expense', 'investment', 'transfer', 'debt_principal')}
     for row in data['budget_items']:
-        if row['month'] == month:
+        if row['month'] == month and (category is None or row['category'] == category):
             totals[row['flow_type']] += int(row['amount'])
     return {'month': month, 'currency': 'KRW', **totals, 'budget_balance': totals['income'] - totals['expense'] - totals['investment'] - totals['debt_principal']}
 
 
-def portfolio_summary(data, cutoff='9999-12-31'):
+def portfolio_summary(data, cutoff='9999-12-31', *, account_id=None, category=None):
     accounts = {a['account_id']: a for a in data['accounts']}
     grouped = {}
     for table, date_key in (('holdings', 'date'), ('dividends', 'payment_date'), ('realized_gains', 'trade_date')):
-        rows = latest(data[table], ('account_id', 'symbol'), cutoff) if table == 'holdings' else [r for r in data[table] if r[date_key] <= cutoff]
+        source = investment_rows(data, table) if category else data[table]
+        rows = latest(source, ('account_id', 'symbol'), cutoff) if table == 'holdings' else [r for r in source if r[date_key] <= cutoff]
         for r in rows:
+            if not matches_investment(r, account_id, category):
+                continue
             key = r['account_id']
             if key not in grouped:
                 grouped[key] = {'account_id': key, 'name': accounts[key]['name'], 'currency': accounts[key]['currency'], 'cost_basis': 0, 'market_value': 0, 'dividend_total': 0, 'realized_profit': 0}
@@ -106,10 +140,11 @@ def assets_summary(data, cutoff):
     return {'date': cutoff, 'by_currency': dict(groups), 'details': details}
 
 
-def dividend_summary(data, year):
+def dividend_summary(data, year, *, account_id=None, category=None):
     groups = defaultdict(lambda: {'gross_amount': 0, 'tax_amount': 0, 'net_amount': 0})
-    for r in data['dividends']:
-        if r['payment_date'][:4] == year:
+    rows = investment_rows(data, 'dividends') if category else data['dividends']
+    for r in rows:
+        if r['payment_date'][:4] == year and matches_investment(r, account_id, category):
             p = groups[(r['payment_date'][:7], r['currency'])]
             for key in p:
                 p[key] += int(r[key])
@@ -177,6 +212,7 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
             return [[operation(table, row_for(raw, table, identifier), {})]], {'deleted': identifier}
         merged = {k: existing[k] for k in MODELS[table].model_fields} if existing else {}
         merged.update(payload)
+        category = merged.pop('investment_category', None) if table in CATEGORY_TABLES else None
         record = validate_record(table, merged, data, existing)
         if method != 'POST' or table not in ('accounts', 'asset_items', 'liabilities'):
             assert_open(data, table, record)
@@ -184,7 +220,27 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
         record.update({SCHEMA[table][0]: identifier or str(uuid4()), 'created_at': existing.get('created_at', stamp) if existing else stamp, 'updated_at': stamp, 'version': int(existing['version']) + 1 if existing else 1})
         record = {k: record[k] for k in SCHEMA[table]}
         row = row_for(raw, table, identifier) if existing else len(raw[table]) + 1
-        return [[operation(table, row, record)]], record
+        operations = [operation(table, row, record)]
+        if table in CATEGORY_TABLES:
+            key = category_key(table, record[SCHEMA[table][0]])
+            previous = category_values(data).get(key, '')
+            toss = any(a['account_id'] == record['account_id'] and is_toss(a) for a in data['accounts'])
+            if 'investment_category' in payload:
+                if category != '' and (category not in TOSS_CATEGORIES or not toss):
+                    raise AppError('토스 계좌에서 제공된 투자 분류만 선택할 수 있습니다.')
+            else:
+                category = previous if toss else ''
+            if category != previous:
+                settings_row = next(
+                    (i for i, entry in enumerate(raw['settings'][1:], 2) if entry and entry[0] == key),
+                    len(raw['settings']) + 1,
+                )
+                operations.append(operation('settings', settings_row, {
+                    'key': key, 'value': category, 'value_type': 'string',
+                    'description': '투자 분류', 'updated_at': stamp,
+                }))
+            record['investment_category'] = category
+        return [operations], record
     return repo.mutate(rid, [table, method, identifier, payload, expected_version], plan)
 
 

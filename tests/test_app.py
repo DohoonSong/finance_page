@@ -227,3 +227,41 @@ def test_formula_plan_is_offline(app, backend):
     assert result.exit_code == 0
     assert 'calc_budget' in result.output and 'SORTN' in result.output
     assert before == backend.read()
+
+
+def test_budget_summary_category_filter(send, client):
+    budget(send)
+    add(send, 'budgets', month='2026-10', category='교통', item='기차', amount=250, flow_type='expense')
+    result = client.get('/api/v1/budget-summary', query_string={'month': '2026-10', 'category': '생활'})
+    assert result.json['data']['expense'] == 100
+
+
+def test_toss_categories_persist_and_filter_without_reusing_old_snapshots(send, client):
+    toss = add(send, 'accounts', name='주계좌', institution='토스증권', type='brokerage', currency='KRW')
+    other = account(send, kind='brokerage')
+    fields = dict(account_id=toss['account_id'], symbol='AAA', currency='KRW')
+    for day, value, category in [('01', 1200, 'ETF'), ('30', 1500, '테크빅')]:
+        add(send, 'holdings', date=f'2026-10-{day}', name='주식', cost_basis=1000,
+            market_value=value, investment_category=category, **fields)
+    dividend = dict(payment_date='2026-10-15', gross_amount=100, tax_amount=15, net_amount=85, **fields)
+    legacy = add(send, 'dividends', **dividend)
+    assert legacy['investment_category'] == ''
+    path = '/dividends/' + legacy['dividend_id']
+    assert send(path, {'expected_version': 1, 'investment_category': '미등록'}, 'PATCH').status_code == 422
+    assert send(path, {'expected_version': 1, 'investment_category': 'ETF'}, 'PATCH').status_code == 200
+    assert send(path, {'expected_version': 2, 'note': '분류 유지'}, 'PATCH').status_code == 200
+    assert send('/dividends', {
+        **dividend, 'account_id': other['account_id'], 'expected_version': 0, 'investment_category': 'ETF',
+    }).status_code == 422
+    add(send, 'dividends', **{**dividend, 'account_id': other['account_id']})
+    add(send, 'realized-gains', trade_date='2026-10-15', profit=20, investment_category='ETF', **fields)
+    query = {'account_id': toss['account_id'], 'investment_category': 'ETF'}
+    assert client.get('/api/v1/portfolio-summary', query_string=query).json['data'][0]['market_value'] == 0
+    assert client.get('/api/v1/portfolio-summary', query_string=query).json['data'][0]['total_profit'] == 105
+    assert client.get('/api/v1/dividend-summary', query_string={**query, 'year': '2026'}).json['data'][0]['net_amount'] == 85
+    rows = client.get('/api/v1/dividends?year=2026').json['data']
+    assert [row['investment_category'] for row in rows] == ['ETF', '']
+    assert not client.get('/api/v1/settings').json['data']['items']
+    assert client.get('/api/v1/backup').json['tables']['settings'][0]['value'] == 'ETF'
+    assert send(path, {'expected_version': 3, 'investment_category': ''}, 'PATCH').status_code == 200
+    assert client.get('/api/v1/dividend-summary', query_string={**query, 'year': '2026'}).json['data'] == []

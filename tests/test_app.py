@@ -265,3 +265,41 @@ def test_toss_categories_persist_and_filter_without_reusing_old_snapshots(send, 
     assert client.get('/api/v1/backup').json['tables']['settings'][0]['value'] == 'ETF'
     assert send(path, {'expected_version': 3, 'investment_category': ''}, 'PATCH').status_code == 200
     assert client.get('/api/v1/dividend-summary', query_string={**query, 'year': '2026'}).json['data'] == []
+
+
+def test_budget_category_levels_persist_copy_and_delete(send, client):
+    item = budget(send, category_2=' 식비 ', category_3='외식')
+    assert (item['category'], item['category_2'], item['category_3']) == ('생활', '식비', '외식')
+    path = '/budgets/' + item['budget_id']
+    assert send(path, {'expected_version': 1, 'category_2': ''}, 'PATCH').status_code == 422
+    assert send(path, {'expected_version': 1, 'note': '메모'}, 'PATCH').json['data']['category_3'] == '외식'
+    copied = send('/budgets/2026-11/copy', {'source_month': '2026-10', 'expected_version': 0})
+    assert copied.status_code == 201
+    result = client.get('/api/v1/budgets?month=2026-11').json['data'][0]
+    assert (result['category_2'], result['category_3']) == ('식비', '외식')
+    assert send(path, {'expected_version': 2}, 'DELETE').status_code == 200
+    settings = client.get('/api/v1/backup').json['tables']['settings']
+    assert [row['key'] for row in settings] == ['budget_category/' + result['budget_id']]
+    assert not client.get('/api/v1/settings').json['data']['items']
+
+
+def test_holding_group_and_dividend_order_with_symbol_and_month_filters(send, client):
+    a = account(send, kind='brokerage')
+    account_id = a['account_id']
+    holding = add(send, 'holdings', date='2026-10-01', account_id=account_id, symbol='AAA',
+                  name='실제 이름', cost_basis=100, market_value=150, currency='KRW',
+                  portfolio_group='장기 투자')
+    assert holding['portfolio_group'] == '장기 투자'
+    assert client.get('/api/v1/holdings').json['data'][0]['portfolio_group'] == '장기 투자'
+    grouped = client.get('/api/v1/portfolio-summary', query_string={
+        'account_id': account_id, 'investment_category': '장기 투자',
+    }).json['data']
+    assert grouped[0]['market_value'] == 150
+
+    for date, symbol, amount in [('2026-10-03', 'AAA', 30), ('2026-11-01', 'AAA', 50), ('2026-10-10', 'BBB', 10)]:
+        add(send, 'dividends', payment_date=date, account_id=account_id, symbol=symbol,
+            gross_amount=amount, tax_amount=0, net_amount=amount, currency='KRW')
+    rows = client.get('/api/v1/dividends?year=2026').json['data']
+    assert [row['payment_date'] for row in rows] == ['2026-11-01', '2026-10-10', '2026-10-03']
+    summary = client.get('/api/v1/dividend-summary?year=2026&month=2026-10&symbol=AAA').json['data']
+    assert [(row['month'], row['net_amount']) for row in summary] == [('2026-10', 30)]

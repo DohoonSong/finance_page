@@ -22,3 +22,11 @@
  border-color: var(--accent);
  color: var(--accent);
 }
+
+.budget-filters {
+ align-items: center;
+}
+.budget-filter-label {
+ font-size: 13px;
+ font-weight: 600;
+}

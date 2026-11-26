@@ -7,7 +7,7 @@ from flask import Blueprint, current_app, g, jsonify, request
 from .auth import login_required
 from .deployment import update_branch
 from .schema import AppError
-from .services import (CATEGORY_PREFIX, CATEGORY_TABLES, TOSS_CATEGORIES, assets_summary, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, month_end, month_value, now, portfolio_summary, reopen, write_record)
+from .services import (CATEGORY_TABLES, TOSS_CATEGORIES, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, month_end, month_value, now, portfolio_summary, reopen, visible_settings, write_record)
 from .store import operation
 
 bp = Blueprint('api', __name__, url_prefix='/api/v1')
@@ -64,13 +64,13 @@ def records(resource, identifier=None):
         data = repository().read()
         rows = investment_rows(data, table) if table in CATEGORY_TABLES else data[table]
         if resource == 'budgets':
-            month = selected_month()
-            rows = [r for r in rows if r['month'] == month]
+            rows = budget_rows(data, selected_month())
         if resource == 'holdings' and request.args.get('account_id'):
             rows = [r for r in rows if r['account_id'] == request.args['account_id']]
         if resource == 'dividends':
             year = selected_year()
-            rows = [r for r in rows if r['payment_date'].startswith(year)]
+            rows = sorted((r for r in rows if r['payment_date'][:4] == year),
+                          key=lambda row: row['payment_date'], reverse=True)
         return ok(rows)
     if request.method == 'DELETE' and resource != 'budgets':
         raise AppError('이 항목은 삭제할 수 없습니다.', 405)
@@ -103,22 +103,27 @@ def assets():
     return ok(assets_summary(repository().read(), cutoff))
 
 
-def investment_filters():
+def investment_filters(*, allow_portfolio_groups=False):
     account_id = request.args.get('account_id')
     category = request.args.get('investment_category')
-    if category and (not account_id or category not in TOSS_CATEGORIES):
+    if category and (not account_id or len(category) > 200 or (not allow_portfolio_groups and category not in TOSS_CATEGORIES)):
         raise AppError('계좌와 유효한 투자 분류를 선택하세요.', 400)
     return {'account_id': account_id, 'category': category}
 
 
 @bp.get('/portfolio-summary')
 def portfolio():
-    return ok(portfolio_summary(repository().read(), **investment_filters()))
+    return ok(portfolio_summary(repository().read(), **investment_filters(allow_portfolio_groups=True)))
 
 
 @bp.get('/dividend-summary')
 def dividends():
-    return ok(dividend_summary(repository().read(), selected_year(), **investment_filters()))
+    year = selected_year()
+    month = request.args.get('month')
+    if month and month_value(month)[:4] != year:
+        raise AppError('지급 월이 조회 연도와 일치하지 않습니다.', 400)
+    return ok(dividend_summary(repository().read(), year, month=month,
+                               symbol=request.args.get('symbol'), **investment_filters()))
 
 
 @bp.get('/closings')
@@ -161,14 +166,14 @@ def settings_version(rows):
 @bp.route('/settings', methods=['GET', 'PATCH'])
 def settings():
     if request.method == 'GET':
-        rows = [row for row in repository().read()['settings'] if not row['key'].startswith(CATEGORY_PREFIX)]
+        rows = visible_settings(repository().read())
         return ok({'items': rows, 'version': settings_version(rows), 'writes_enabled': current_app.config['WRITES_ENABLED'], 'backend': current_app.config['DATA_BACKEND'], 'timezone': 'Asia/Seoul', 'base_currency': 'KRW', 'update_branch': update_branch()})
     value = body(('expected_version', 'display_name'))
     name = value.get('display_name')
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
         raise AppError('표시 이름은 1~100자입니다.')
     def plan(raw, data):
-        if value.get('expected_version') != settings_version([r for r in data['settings'] if not r['key'].startswith(CATEGORY_PREFIX)]):
+        if value.get('expected_version') != settings_version(visible_settings(data)):
             raise AppError('설정이 변경되었습니다. 새로고침하세요.', 409)
         row = next((i for i, r in enumerate(raw['settings'][1:], 2) if r and r[0] == 'display_name'), len(raw['settings']) + 1)
         record = dict(key='display_name', value=name.strip(), value_type='string', description='웹앱 표시 이름', updated_at=now())

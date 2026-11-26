@@ -17,6 +17,45 @@ TOSS_CATEGORIES = ('기타주식', '미국배당주', '워렌버핏', '주간배
 CATEGORY_TABLES = ('holdings', 'dividends', 'realized_gains')
 CATEGORY_PREFIX = 'investment_category/'
 
+BUDGET_CATEGORY_PREFIX = 'budget_category/'
+BUDGET_CATEGORY_FIELDS = ('category_2', 'category_3')
+
+
+def visible_settings(data):
+    return [row for row in data['settings']
+            if not str(row['key']).startswith((CATEGORY_PREFIX, BUDGET_CATEGORY_PREFIX))]
+
+
+def budget_categories(data):
+    categories = {}
+    for row in data['settings']:
+        key = str(row['key'])
+        if key.startswith(BUDGET_CATEGORY_PREFIX):
+            try:
+                values = json.loads(row['value'])
+            except (ValueError, TypeError):
+                continue
+            if isinstance(values, list) and len(values) == 2 and all(isinstance(value, str) for value in values):
+                categories[key.removeprefix(BUDGET_CATEGORY_PREFIX)] = tuple(values)
+    return categories
+
+
+def budget_rows(data, month):
+    categories = budget_categories(data)
+    return [{**row, **dict(zip(BUDGET_CATEGORY_FIELDS, categories.get(row['budget_id'], ('', ''))))}
+            for row in data['budget_items'] if row['month'] == month]
+
+
+def budget_category_operation(row, identifier, values, stamp):
+    fields = {
+        'key': BUDGET_CATEGORY_PREFIX + identifier,
+        'value': json.dumps(values, ensure_ascii=False),
+        'value_type': 'json',
+        'description': '예산 하위 분류',
+        'updated_at': stamp,
+    } if any(values) else {}
+    return operation('settings', row, fields)
+
 
 def is_toss(account):
     return any('토스' in str(account[field]) or 'toss' in str(account[field]).lower()
@@ -35,8 +74,14 @@ def category_values(data):
 def investment_rows(data, table):
     categories = category_values(data)
     toss_ids = {row['account_id'] for row in data['accounts'] if is_toss(row)}
-    return [{**row, 'investment_category': categories.get(category_key(table, row[SCHEMA[table][0]]), '')
-             if row['account_id'] in toss_ids else ''} for row in data[table]]
+    rows = []
+    for row in data[table]:
+        group = categories.get(category_key(table, row[SCHEMA[table][0]]), '')
+        result = {**row, 'investment_category': group if row['account_id'] in toss_ids else ''}
+        if table == 'holdings':
+            result['portfolio_group'] = group
+        rows.append(result)
+    return rows
 
 
 def matches_investment(row, account_id, category):
@@ -101,6 +146,8 @@ def portfolio_summary(data, cutoff='9999-12-31', *, account_id=None, category=No
         source = investment_rows(data, table) if category else data[table]
         rows = latest(source, ('account_id', 'symbol'), cutoff) if table == 'holdings' else [r for r in source if r[date_key] <= cutoff]
         for r in rows:
+            if table == 'holdings' and category:
+                r = {**r, 'investment_category': r['portfolio_group']}
             if not matches_investment(r, account_id, category):
                 continue
             key = r['account_id']
@@ -140,11 +187,14 @@ def assets_summary(data, cutoff):
     return {'date': cutoff, 'by_currency': dict(groups), 'details': details}
 
 
-def dividend_summary(data, year, *, account_id=None, category=None):
+def dividend_summary(data, year, *, account_id=None, category=None, month=None, symbol=None):
     groups = defaultdict(lambda: {'gross_amount': 0, 'tax_amount': 0, 'net_amount': 0})
     rows = investment_rows(data, 'dividends') if category else data['dividends']
     for r in rows:
-        if r['payment_date'][:4] == year and matches_investment(r, account_id, category):
+        if (r['payment_date'][:4] == year
+                and (not month or r['payment_date'][:7] == month)
+                and (not symbol or r['symbol'] == symbol)
+                and matches_investment(r, account_id, category)):
             p = groups[(r['payment_date'][:7], r['currency'])]
             for key in p:
                 p[key] += int(r[key])
@@ -208,11 +258,29 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
             assert_open(data, table, existing)
         elif expected_version != 0 or type(expected_version) is not int:
             raise AppError('생성 요청은 expected_version=0이 필요합니다.', 400)
+        if table == 'budget_items':
+            key = BUDGET_CATEGORY_PREFIX + (identifier or '')
+            category_row = next(
+                (i for i, entry in enumerate(raw['settings'][1:], 2) if entry and entry[0] == key),
+                None,
+            )
         if method == 'DELETE':
-            return [[operation(table, row_for(raw, table, identifier), {})]], {'deleted': identifier}
+            operations = [operation(table, row_for(raw, table, identifier), {})]
+            if table == 'budget_items' and category_row is not None:
+                operations.append(operation('settings', category_row, {}))
+            return [operations], {'deleted': identifier}
         merged = {k: existing[k] for k in MODELS[table].model_fields} if existing else {}
         merged.update(payload)
         category = merged.pop('investment_category', None) if table in CATEGORY_TABLES else None
+        portfolio_group = merged.pop('portfolio_group', None) if table == 'holdings' else None
+        if table == 'budget_items':
+            previous = budget_categories(data).get(identifier, ('', ''))
+            values = tuple(merged.pop(field, old) for field, old in zip(BUDGET_CATEGORY_FIELDS, previous))
+            if any(not isinstance(value, str) or len(value.strip()) > 200 for value in values):
+                raise AppError('하위 분류는 200자 이하의 텍스트로 입력하세요.')
+            values = tuple(value.strip() for value in values)
+            if values[1] and not values[0]:
+                raise AppError('3차 분류를 입력하려면 2차 분류가 필요합니다.')
         record = validate_record(table, merged, data, existing)
         if method != 'POST' or table not in ('accounts', 'asset_items', 'liabilities'):
             assert_open(data, table, record)
@@ -221,15 +289,29 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
         record = {k: record[k] for k in SCHEMA[table]}
         row = row_for(raw, table, identifier) if existing else len(raw[table]) + 1
         operations = [operation(table, row, record)]
+        if table == 'budget_items':
+            if values != previous:
+                operations.append(budget_category_operation(
+                    category_row or len(raw['settings']) + 1, record['budget_id'], values, stamp,
+                ))
+            record.update(zip(BUDGET_CATEGORY_FIELDS, values))
         if table in CATEGORY_TABLES:
             key = category_key(table, record[SCHEMA[table][0]])
             previous = category_values(data).get(key, '')
             toss = any(a['account_id'] == record['account_id'] and is_toss(a) for a in data['accounts'])
-            if 'investment_category' in payload:
+            if table == 'holdings' and 'portfolio_group' in payload:
+                if not isinstance(portfolio_group, str) or len(portfolio_group.strip()) > 200:
+                    raise AppError('포트폴리오 묶음은 200자 이하의 텍스트로 입력하세요.')
+                category = portfolio_group.strip()
+                if toss and category and category not in TOSS_CATEGORIES:
+                    raise AppError('토스 계좌에서 제공된 투자 분류만 선택할 수 있습니다.')
+            elif 'investment_category' in payload:
                 if category != '' and (category not in TOSS_CATEGORIES or not toss):
                     raise AppError('토스 계좌에서 제공된 투자 분류만 선택할 수 있습니다.')
             else:
-                category = previous if toss else ''
+                category = previous if toss or table == 'holdings' else ''
+                if table == 'holdings' and existing and existing['account_id'] != record['account_id']:
+                    category = ''
             if category != previous:
                 settings_row = next(
                     (i for i, entry in enumerate(raw['settings'][1:], 2) if entry and entry[0] == key),
@@ -239,7 +321,9 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
                     'key': key, 'value': category, 'value_type': 'string',
                     'description': '투자 분류', 'updated_at': stamp,
                 }))
-            record['investment_category'] = category
+            record['investment_category'] = category if toss else ''
+            if table == 'holdings':
+                record['portfolio_group'] = category
         return [operations], record
     return repo.mutate(rid, [table, method, identifier, payload, expected_version], plan)
 
@@ -252,11 +336,19 @@ def copy_budget(repo, rid, target, source, expected_version):
         assert_open(data, 'budget_items', {'month': target})
         if any(r['month'] == target for r in data['budget_items']):
             raise AppError('대상 월에 예산이 이미 있습니다.', 409)
-        records = []
-        for r in data['budget_items']:
-            if r['month'] == source:
-                records.append({**r, 'budget_id': str(uuid4()), 'month': target, 'created_at': now(), 'updated_at': now(), 'version': 1})
-        return [[operation('budget_items', len(raw['budget_items']) + i + 1, r) for i, r in enumerate(records)]], {'items': records}
+        records, operations = [], []
+        settings_row = len(raw['settings']) + 1
+        for row, source_record in enumerate(budget_rows(data, source), len(raw['budget_items']) + 1):
+            stamp = now()
+            record = {**source_record, 'budget_id': str(uuid4()), 'month': target,
+                      'created_at': stamp, 'updated_at': stamp, 'version': 1}
+            records.append(record)
+            operations.append(operation('budget_items', row, record))
+            values = tuple(record[field] for field in BUDGET_CATEGORY_FIELDS)
+            if any(values):
+                operations.append(budget_category_operation(settings_row, record['budget_id'], values, stamp))
+                settings_row += 1
+        return [operations], {'items': records}
     return repo.mutate(rid, ['copy', target, source, expected_version], plan)
 
 

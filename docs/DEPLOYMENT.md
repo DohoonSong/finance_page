@@ -85,3 +85,11 @@ PYTHONANYWHERE_API_TOKEN='발급한 API 토큰'
 운영 서버가 `main`으로 전환되면 이 값도 `main`으로 바꿉니다. 두 설정을 저장하고 Reload한 뒤 로그인하면 설정 탭에서 **업데이트 및 Reload** 버튼을 사용할 수 있습니다. 확인창에서 취소하면 서버에 요청을 보내지 않습니다.
 
 버튼은 현재 체크아웃된 지정 브랜치에서 GitHub의 최신 커밋으로 빠르게 전진할 수 있을 때만 코드를 반영합니다. 작업 폴더에 미커밋 변경이 있거나 원격과 분기한 커밋이 있으면 Bash에서 해결합니다. Git 업데이트에 성공하면 PythonAnywhere API로 Reload를 요청합니다. API가 Reload를 거부하더라도 가져온 코드는 서버에 있으므로 Web 탭에서 Reload할 수 있습니다. 의존성 설치와 환경설정 변경이 필요한 릴리스에는 Bash 배포 절차를 사용합니다.
+
+## ClevMoney 실제 거래 가져오기
+
+Google Cloud 프로젝트에서 **Google Drive API**를 활성화하고, 백업 폴더를 서비스 계정에 뷰어로 공유합니다. 운영 Google Sheets에는 서비스 계정의 편집자 권한과 `WRITES_ENABLED=true`가 필요합니다. PythonAnywhere에서 `www.googleapis.com`과 `oauth2.googleapis.com`에 연결할 수 있어야 합니다.
+
+서버의 `.env`에 `CLEV_BACKUP_FOLDER_ID=1Oj4v4re7dxID6il27F5nP39sJAMvmCPv`를 추가한 뒤 Reload합니다. **설정 → ClevMoney 백업 → 최신 백업 가져오기**를 누르면 Drive에서 수정 시각이 가장 최근인 ClevMoney 백업을 읽습니다.
+
+첫 가져오기에서 운영 스프레드시트에 `actual_transactions` 탭을 만듭니다. 파일 ID·수정 시각·거래 수·월별 행 범위를 첫 행에, 거래 스키마를 둘째 행에 기록합니다. 이후 최신 백업의 전체 거래로 해당 탭을 교체합니다. 웹앱의 예산 원장과 월마감 계산은 기존 데이터를 사용합니다. 백업에 보관된 정산·저축 등은 원본 수입/지출 구분을 따르며 명시적 계좌 이체 분류는 합계에서 분리합니다. 가져온 내역은 **월별 예산 → 실제 수입·지출**에서 조회합니다.

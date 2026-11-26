@@ -3,12 +3,16 @@ import json
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from google.auth.exceptions import GoogleAuthError
+from gspread.exceptions import APIError, SpreadsheetNotFound
+from requests import RequestException
 from flask import Blueprint, current_app, g, jsonify, request
+from .actuals import download_latest, monthly_actuals, publish
 from .auth import login_required
 from .deployment import update_branch
 from .schema import AppError
 from .services import (CATEGORY_TABLES, TOSS_CATEGORIES, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, month_end, month_value, now, portfolio_summary, reopen, visible_settings, write_record)
-from .store import operation
+from .store import GoogleSheets, operation
 
 bp = Blueprint('api', __name__, url_prefix='/api/v1')
 RESOURCES = {'accounts': 'accounts', 'asset-items': 'asset_items', 'budgets': 'budget_items', 'recurring-items': 'recurring_items', 'asset-snapshots': 'asset_snapshots', 'liabilities': 'liabilities', 'liability-snapshots': 'liability_snapshots', 'holdings': 'holdings', 'dividends': 'dividends', 'realized-gains': 'realized_gains'}
@@ -179,6 +183,30 @@ def settings():
         record = dict(key='display_name', value=name.strip(), value_type='string', description='웹앱 표시 이름', updated_at=now())
         return [[operation('settings', row, record)]], record
     return ok(repository().mutate(g.request_id, ['settings', value], plan))
+
+
+@bp.route('/actual-transactions', methods=['GET', 'POST'])
+def actual_transactions():
+    repo = repository()
+    folder = current_app.config['CLEV_BACKUP_FOLDER_ID']
+    if not isinstance(repo.backend, GoogleSheets) or not re.fullmatch(r'[A-Za-z0-9_-]+', folder):
+        raise AppError('ClevMoney 백업 연동이 설정되지 않았습니다.', 403, 'actuals_disabled')
+    if request.method == 'POST':
+        if body(('confirm',)).get('confirm') is not True:
+            raise AppError('최신 백업 가져오기를 확인해 주세요.', 400, 'import_unconfirmed')
+        item, rows = download_latest(repo.backend.credentials, folder)
+    try:
+        with repo.locked():
+            book = repo.backend.book
+            if request.method == 'POST':
+                return ok(publish(book, item, rows))
+            return ok(monthly_actuals(book, selected_month()))
+    except (APIError, GoogleAuthError, OSError, RequestException, SpreadsheetNotFound) as exc:
+        error = exc if isinstance(exc, APIError) else exc.__cause__
+        status = error.response.status_code if isinstance(error, APIError) else None
+        if status == 403:
+            raise AppError('실제 거래 탭에 접근할 수 없습니다. 서비스 계정의 시트 권한을 확인하세요.', 503, 'actuals_permission') from None
+        raise AppError('실제 거래 시트에 연결할 수 없습니다. 잠시 후 다시 확인하세요.', 503, 'actuals_unavailable') from None
 
 
 @bp.get('/backup')

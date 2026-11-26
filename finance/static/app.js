@@ -4,6 +4,7 @@ const workspace = $('#workspace');
 const page = document.body.dataset.page;
 const tossCategories = JSON.parse(document.body.dataset.tossCategories);
 const filters = {budget:[null,null,null], account:'', category:'', holdingName:'', dividendSymbol:'', dividendMonth:''};
+const actualsEnabled = document.body.dataset.actuals==='true';
 const writable = document.body.dataset.writes === 'true';
 if (['investments','settings'].includes(page)) $('.month-picker').hidden=true;
 const csrf = $('meta[name="csrf-token"]').content;
@@ -18,7 +19,7 @@ function shiftRate(value, places) {
  return Number(digits+'e'+(Number(exponent)+places));
 }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const labels = {name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
+const labels = {name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',subcategory:'하위 분류',payment_method:'결제 수단',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
 const words = {income:'수입',expense:'소비',investment:'투자 배분',transfer:'계좌 이체',debt_principal:'원금 상환',bank:'은행',cash:'현금',brokerage:'증권',retirement:'퇴직연금',other:'기타',deposit:'예금',property:'부동산',open:'진행 중',preparing:'마감 중',closed:'마감',true:'사용',false:'미사용'};
 const numeric = new Set(['amount','day','original_principal','annual_rate','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit']);
 const moneyKeys = new Set(['amount','original_principal','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit','net_worth','assets_total','liabilities_total','unrealized_profit','dividend_total','realized_profit','total_profit','budget_balance','portfolio_profit']);
@@ -194,6 +195,16 @@ async function render(focusFilter=null) {
     '소비·투자 배분·원금 상환의 수입 대비 비중입니다. 계좌 이체는 상세에서 확인할 수 있습니다.');
    html+=panel('상세 예산 항목',`<div id="budget-filters">${budgetFilterButtons(rows)}</div>`+`<div id="budget-details" data-income="${esc(summary.income)}">${budgetDetailTable(rows,summary.income)}</div>`,
     `<button data-action="copy" ${writable?'':'disabled'}>다른 월에서 복사</button>${button('budgets')}`);
+   if (actualsEnabled) {
+    try {
+     const actuals=await api('/actual-transactions?month='+month);
+     const actualRows=actuals.items.map(row=>({...row,date:row.date.endsWith('-50')?row.date.slice(0,7)+' (일자 미확정)':row.date,item:row.description,note:row.memo}));
+     html+=panel('실제 수입·지출',table(actualRows,['date','flow_type','category','subcategory','item','amount','payment_method','note']),'',
+      actuals.filename?`실제 수입 ${money(actuals.totals.income)} · 실제 지출 ${money(actuals.totals.expense)} · 백업 ${actuals.filename}`:'설정에서 최신 ClevMoney 백업을 가져올 수 있습니다.');
+    } catch(err) {
+     html+=panel('실제 수입·지출',`<p class="error">${esc(err.message)}</p>`);
+    }
+   }
    html+=panel('반복 예산 템플릿',table(recurring,['item','flow_type','day','amount','start_month','end_month','active'],'recurring-items'),button('recurring-items'),'반복 항목은 템플릿으로 저장됩니다. 월 예산에는 자동으로 더하지 않습니다.');
   } else if(page==='assets') {
    const [accounts, items, loans, snaps, debts, summary]=await Promise.all([getCollection('accounts'),getCollection('asset-items'),getCollection('liabilities'),getCollection('asset-snapshots'),getCollection('liability-snapshots'),api('/assets?date='+month+'-'+new Date(Number(year),Number(month.slice(5)),0).getDate())]);
@@ -242,6 +253,9 @@ async function render(focusFilter=null) {
    const [rows,s]=await Promise.all([getCollection('accounts'),api('/settings')]);settings=s;
    html=panel('계좌 관리',table(rows,['name','type','institution','currency','active'],'accounts'),button('accounts'));
    html+=panel('데이터와 표시 설정',table(s.items,['key','value','description']),`<button data-action="display-name" ${writable?'':'disabled'}>표시 이름</button><a href="/api/v1/backup">JSON 백업 내려받기 ↗</a>`);
+   html+=panel('ClevMoney 백업',
+    `<p class="section-note">${actualsEnabled?'Drive에서 가장 최근에 수정된 백업의 실제 수입·지출을 가져옵니다.':'서버에 Drive 폴더를 설정하면 사용할 수 있습니다.'}</p>`,
+    `<button data-action="import-backup" ${actualsEnabled && writable?'':'disabled'}>최신 백업 가져오기</button>`);
    html+=panel('서버 업데이트',
     `<p class="section-note">${s.update_branch?esc(s.update_branch)+' 브랜치의 최신 코드를 가져온 뒤 웹앱을 다시 시작합니다.':'PythonAnywhere에서 업데이트 설정을 활성화하면 사용할 수 있습니다.'}</p>`,
     `<button data-action="deploy-update" ${s.update_branch?'':'disabled'}>업데이트 및 Reload</button>`);
@@ -336,6 +350,12 @@ workspace.addEventListener('click',async e=>{
   else if(el.dataset.edit) await openEditor(el.dataset.edit,el.dataset.id);
   else if(el.dataset.delete){const row=collections.budgets.find(r=>r.budget_id===el.dataset.delete);if(confirm(`“${row.item}” 예산을 삭제할까요?`)){await api('/budgets/'+row.budget_id,'DELETE',{expected_version:Number(row.version)});message('삭제했습니다.');await render();}}
   else if(el.dataset.action==='copy'){const source=prompt('복사할 원본 월 (YYYY-MM)');if(source){await api('/budgets/'+monthInput.value+'/copy','POST',{source_month:source,expected_version:0});message('예산을 복사했습니다.');await render();}}
+  else if(el.dataset.action==='import-backup'){
+   if (!confirm('최신 ClevMoney 백업으로 실제 수입·지출을 갱신할까요?')) return;
+   message('Drive에서 백업을 가져오는 중입니다…');
+   const result=await api('/actual-transactions','POST',{confirm:true});
+   message(result.changed?`${result.filename}에서 ${result.count.toLocaleString('ko-KR')}건을 가져왔습니다.`:`${result.filename}은 이미 반영되어 있습니다.`);
+  }
   else if(el.dataset.action==='deploy-update'){
    if (!confirm(`${settings.update_branch}의 최신 코드로 업데이트하고 웹앱을 다시 시작할까요? 잠시 접속이 중단될 수 있습니다.`)) return;
    try {

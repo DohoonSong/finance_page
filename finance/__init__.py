@@ -20,6 +20,7 @@ def create_app(config=None, backend=None):
     production = os.getenv('APP_ENV') == 'production'
     app.config.update(SECRET_KEY=os.getenv('SECRET_KEY'), ADMIN_USERNAME=os.getenv('ADMIN_USERNAME', 'owner'), ADMIN_PASSWORD_HASH=os.getenv('ADMIN_PASSWORD_HASH', ''), DATA_BACKEND=os.getenv('DATA_BACKEND', 'sheets'), SPREADSHEET_ID=os.getenv('SPREADSHEET_ID', '1MQ29rkoZKE02srltVNDd7Hs9i7igfEyPiAR5lOUelhs'), GOOGLE_APPLICATION_CREDENTIALS=os.getenv('GOOGLE_APPLICATION_CREDENTIALS', ''), STATE_DIR=os.getenv('STATE_DIR', str(Path(app.root_path).parent / 'instance')), CACHE_SECONDS=int(os.getenv('CACHE_SECONDS', '5')), WRITES_ENABLED=os.getenv('WRITES_ENABLED', 'false').lower() == 'true', SESSION_COOKIE_SECURE=os.getenv('SESSION_COOKIE_SECURE', str(production)).lower() == 'true', SESSION_COOKIE_HTTPONLY=True, SESSION_COOKIE_SAMESITE='Lax', PERMANENT_SESSION_LIFETIME=timedelta(hours=8), MAX_CONTENT_LENGTH=64 * 1024, WTF_CSRF_TIME_LIMIT=28800)
     app.config.update(
+        CLEV_BACKUP_FOLDER_ID=os.getenv('CLEV_BACKUP_FOLDER_ID', ''),
         DEPLOY_UPDATE_BRANCH=os.getenv('DEPLOY_UPDATE_BRANCH', ''),
         PYTHONANYWHERE_API_TOKEN=os.getenv('PYTHONANYWHERE_API_TOKEN', ''),
     )

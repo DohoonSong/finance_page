@@ -16,4 +16,4 @@ def index():
 def page(page):
     if page not in PAGES:
         abort(404)
-    return render_template('app.html', page=page, pages=PAGES, title=PAGES[page], demo=current_app.config['DATA_BACKEND'] == 'memory', toss_categories=TOSS_CATEGORIES, writes=current_app.config['WRITES_ENABLED'])
+    return render_template('app.html', page=page, pages=PAGES, title=PAGES[page], demo=current_app.config['DATA_BACKEND'] == 'memory', toss_categories=TOSS_CATEGORIES, actuals_enabled=bool(current_app.config['CLEV_BACKUP_FOLDER_ID']) and current_app.config['DATA_BACKEND']=='sheets', writes=current_app.config['WRITES_ENABLED'])

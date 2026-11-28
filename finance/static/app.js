@@ -266,6 +266,30 @@ function actualFilter(key, label, rows) {
  return `<label>${label}<select data-actual-filter="${key}" aria-label="${label}" ${options.length?'':'disabled'}>
   ${selectOptions(choices,JSON.stringify(actualFilters[key]),'전체')}</select></label>`;
 }
+function actualExpenseGroups(rows, fields, income) {
+ const categories=new Map();
+ for (const row of rows) {
+  const category=row.category || '';
+  const subcategory=row.subcategory || '';
+  if (!categories.has(category)) categories.set(category,{amount:0,subgroups:new Map()});
+  const group=categories.get(category);
+  if (!group.subgroups.has(subcategory)) group.subgroups.set(subcategory,{amount:0,rows:[]});
+  const subgroup=group.subgroups.get(subcategory);
+  const amount=Number(row.amount);
+  group.amount+=amount;
+  subgroup.amount+=amount;
+  subgroup.rows.push(row);
+ }
+ const detailsFields=fields.filter(field=>field!=='category' && field!=='subcategory');
+ return Array.from(categories,([category,group])=>`<section class="actual-expense-group">
+  <h4 class="actual-expense-line"><span>${esc(category || '미분류')}</span><strong>${budgetValue(group.amount,income)}</strong></h4>
+  ${Array.from(group.subgroups,([subcategory,subgroup])=>`<details class="actual-expense-detail">
+   <summary><span class="actual-expense-line"><span>${esc(subcategory || '미분류')}</span>
+    <strong>${budgetValue(subgroup.amount,income)}</strong></span></summary>
+   ${table(subgroup.rows,detailsFields)}
+  </details>`).join('')}
+ </section>`).join('');
+}
 function actualDetails(actuals) {
  const category=actualFilter('category','실제 거래 분류',actuals.items);
  const grouped=actuals.items.filter(row=>actualFilters.category===null || (row.category || '')===actualFilters.category);
@@ -283,7 +307,10 @@ function actualDetails(actuals) {
   .map(([flow,label])=>{
    const matching=rows.filter(row=>row.flow_type===flow);
    if (flow==='transfer' && !matching.length) return '';
-   const content=matching.length?table(matching,fields):'<p class="caption">표시할 거래가 없습니다.</p>';
+   let content='<p class="caption">표시할 거래가 없습니다.</p>';
+   if (matching.length) {
+    content=flow==='expense'?actualExpenseGroups(matching,fields,actuals.totals.income):table(matching,fields);
+   }
    return `<section class="actual-table"><h3>${label}</h3>${content}</section>`;
   }).join('');
  return `<div class="record-filters">${category}${subcategory}</div>${tables}`;

@@ -96,3 +96,32 @@
 .asset-records[open] > summary { margin-bottom: .75rem; }
 
 .actual-table + .actual-table { margin-top: 1.25rem; }
+
+.actual-expense-group {
+ border: 1px solid var(--line);
+ border-radius: 8px;
+ margin-bottom: .75rem;
+ overflow: hidden;
+}
+.actual-expense-line {
+ display: flex;
+ justify-content: space-between;
+ align-items: baseline;
+ gap: .75rem;
+}
+.actual-expense-line strong { flex-shrink: 0; }
+.actual-expense-group > h4 {
+ margin: 0;
+ padding: .65rem .75rem;
+ background: var(--soft);
+}
+.actual-expense-detail { border-top: 1px solid var(--line); }
+.actual-expense-detail > summary {
+ cursor: pointer;
+ padding: .65rem .75rem;
+}
+.actual-expense-detail > summary .actual-expense-line {
+ display: inline-flex;
+ width: calc(100% - 1.2rem);
+ vertical-align: top;
+}

@@ -283,7 +283,7 @@ function paginationControls(page,pages,attribute,label) {
  </div>`;
 }
 function holdingTable(rows) {
- const paginate=!filters.account && !filters.category && !filters.holdingName;
+ const paginate=!filters.category && !filters.holdingName;
  const pages=paginate?Math.max(1,Math.ceil(rows.length/recordsPerPage)):1;
  holdingPage=Math.min(holdingPage,pages);
  const offset=(holdingPage-1)*recordsPerPage;

@@ -49,7 +49,7 @@ def budget_rows(data, month):
 
 
 def lease_budget(data, month):
-    names = {'전세금': 'lease_deposit', '전세상환금': 'lease_repayment'}
+    names = {'전세대출': 'lease_loan', '전세상환금': 'lease_repayment'}
     totals = dict.fromkeys(names.values())
     for row in budget_rows(data, month):
         for field in ('category_3', 'category_2', 'item', 'category'):
@@ -57,8 +57,13 @@ def lease_budget(data, month):
             if key:
                 totals[key] = (totals[key] or 0) + int(row['amount'])
                 break
-    totals['lease_total'] = (sum(value or 0 for value in totals.values())
-                             if any(value is not None for value in totals.values()) else None)
+    loan = totals['lease_loan']
+    repayment = totals['lease_repayment']
+    if repayment is not None:
+        # Historical budgets can use a negative sign for repayments.
+        repayment = abs(repayment)
+    totals['lease_repayment'] = repayment
+    totals['lease_total'] = loan - (repayment or 0) if loan is not None else None
     return totals
 
 

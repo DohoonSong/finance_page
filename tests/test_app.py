@@ -83,7 +83,9 @@ def test_negative_monthly_budget_amount_is_saved_and_applied(send, client):
     summary = client.get('/api/v1/budget-summary?month=2026-10').json['data']
     assert summary['debt_principal'] == -250
     assert summary['budget_balance'] == 250
-    assert client.get('/api/v1/assets?date=2026-10-31').json['data']['lease_budget']['lease_total'] == -250
+    lease = client.get('/api/v1/assets?date=2026-10-31').json['data']['lease_budget']
+    assert lease['lease_repayment'] == 250
+    assert lease['lease_total'] is None
     copied = send('/budgets/2026-11/copy', {'expected_version': 0, 'source_month': '2026-10'})
     assert copied.json['data']['items'][0]['amount'] == -250
 
@@ -319,13 +321,15 @@ def test_holding_group_and_dividend_order_with_symbol_and_month_filters(send, cl
     assert [(row['month'], row['net_amount']) for row in summary] == [('2026-10', 30)]
 
 
-def test_lease_amounts_use_only_selected_months_budget(send, client):
-    add(send, 'budgets', month='2026-11', category='주거', item='전세금', amount=1000, flow_type='expense')
+@pytest.mark.parametrize('repayment', [200, -200])
+def test_lease_amounts_use_only_selected_months_budget(send, client, repayment):
+    add(send, 'budgets', month='2026-11', category='주거', item='전세금', amount=2400, flow_type='expense')
+    add(send, 'budgets', month='2026-11', category='주거', item='전세대출', amount=1000, flow_type='income')
     add(send, 'budgets', month='2026-11', category='주거', item='상환', category_2='전세 상환금',
-        amount=200, flow_type='debt_principal')
-    add(send, 'budgets', month='2026-10', category='주거', item='전세금', amount=900, flow_type='expense')
+        amount=repayment, flow_type='debt_principal')
+    add(send, 'budgets', month='2026-10', category='주거', item='전세대출', amount=900, flow_type='income')
     result = client.get('/api/v1/assets?date=2026-11-30').json['data']
-    assert result['lease_budget'] == {'lease_deposit': 1000, 'lease_repayment': 200, 'lease_total': 1200}
+    assert result['lease_budget'] == {'lease_loan': 1000, 'lease_repayment': 200, 'lease_total': 800}
     assert result['by_currency']['KRW']['liabilities_total'] == 0
     assert client.get('/api/v1/assets?date=2026-09-30').json['data']['lease_budget']['lease_total'] is None
 

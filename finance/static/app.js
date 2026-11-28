@@ -40,6 +40,7 @@ const schemas = {
 const titles = {'accounts':'계좌','asset-items':'자산 항목','budgets':'예산','recurring-items':'반복 예산','asset-snapshots':'자산 잔액','liabilities':'대출','liability-snapshots':'대출 잔액','holdings':'보유종목','dividends':'배당','realized-gains':'실현 손익'};
 const idKeys = {'accounts':'account_id','asset-items':'asset_id','budgets':'budget_id','recurring-items':'recurring_id','asset-snapshots':'snapshot_id','liabilities':'loan_id','liability-snapshots':'snapshot_id','holdings':'holding_id','dividends':'dividend_id','realized-gains':'gain_id'};
 let budgetView = null;
+let actualView = null;
 const actualFilters = {category:null, subcategory:null};
 let collections = {}, editor = null, closingPreview = null, settings = null, loadSequence = 0;
 const pendingRequests = new Map();
@@ -287,21 +288,23 @@ function actualDetails(actuals) {
   }).join('');
  return `<div class="record-filters">${category}${subcategory}</div>${tables}`;
 }
-function budgetPage({rows, recurring, summary, actuals, actualError}) {
+function actualPage({actuals, error}) {
+ if (error) return panel('실제 수입·지출',`<p class="error">${esc(percentOnly()?'실제 수입·지출을 불러오지 못했습니다.':error)}</p>`);
+ if (!actuals?.filename) {
+  const help=actualsEnabled?'설정에서 최신 ClevMoney 백업을 가져오면 거래가 표시됩니다.':'서버에서 ClevMoney 백업 연동을 설정하면 사용할 수 있습니다.';
+  return panel('실제 수입·지출',`<p class="section-note">${help}</p>`,'<a href="/settings">설정으로 이동</a>');
+ }
+ const income=actuals.totals.income;
+ const totals=`실제 수입 ${budgetValue(income,income)} · 실제 소비 ${budgetValue(actuals.totals.expense,income)}`;
+ return panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals)}</div>`,'',
+  totals+(percentOnly()?'':' · 백업 '+actuals.filename));
+}
+function budgetPage({rows, recurring, summary}) {
  const masked=percentOnly(), income=summary.income;
  const incomeRows=rows.filter(row=>row.flow_type==='income')
   .map(row=>({...row,income_share:incomeShare(row.amount,income)}));
  const expenseTotals=budgetCategoryTotals(rows.filter(isBudgetOutflow),income);
- let html='';
- if (actuals) {
-  const actualIncome=actuals.totals.income;
-  html+=panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals)}</div>`,'',
-   actuals.filename?`실제 수입 ${budgetValue(actualIncome,actualIncome)} · 실제 소비 ${budgetValue(actuals.totals.expense,actualIncome)}${masked?'':' · 백업 '+actuals.filename}`
-    :'설정에서 최신 ClevMoney 백업을 가져올 수 있습니다.');
- } else if (actualError) {
-  html+=panel('실제 수입·지출',`<p class="error">${esc(masked?'실제 수입·지출을 불러오지 못했습니다.':actualError)}</p>`);
- }
- html+=`<div class="cards">${card('수입',budgetValue(income,income),'월 예산')}${card('소비',budgetValue(summary.expense,income),'투자 및 원금 상환 제외')}${card('투자 배분',budgetValue(summary.investment,income),'자산으로 이동하는 금액')}${card('예산 잔액',budgetValue(summary.budget_balance,income),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
+ let html=`<div class="cards">${card('수입',budgetValue(income,income),'월 예산')}${card('소비',budgetValue(summary.expense,income),'투자 및 원금 상환 제외')}${card('투자 배분',budgetValue(summary.investment,income),'자산으로 이동하는 금액')}${card('예산 잔액',budgetValue(summary.budget_balance,income),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
  html+=panel('수입 항목',table(incomeRows,masked?['category','item','income_share']:['category','item','amount','note'],masked?null:'budgets'),
   masked?'':`<button data-add="budgets" data-flow-type="income" ${writable?'':'disabled'}>+ 수입</button>`,
   `수입 합계 ${budgetValue(income,income)}${!masked && income>0?' · 100%':''}`);
@@ -316,7 +319,8 @@ function budgetPage({rows, recurring, summary, actuals, actualError}) {
  return html;
 }
 percentToggle?.addEventListener('change',()=>{
- if (budgetView) workspace.innerHTML=budgetPage(budgetView);
+ if (page==='budgets' && budgetView) workspace.innerHTML=budgetPage(budgetView);
+ if (page==='actuals' && actualView) workspace.innerHTML=actualPage(actualView);
  $('#message').hidden=true;
 });
 async function render(focusFilter=null) {
@@ -336,12 +340,16 @@ async function render(focusFilter=null) {
    if(foreign.length) html+=panel('외화 자산',table(foreign.map(([currency,v])=>({currency,...v})),['currency','assets_total','net_worth']),'','KRW 총액에 합산하지 않습니다.');
    html+=panel('투자 현황',table(d.portfolio,['name','currency','market_value','total_profit']),'<a href="/investments">투자 관리 ↗</a>');
   } else if(page==='budgets') {
-   const [rows, recurring, summary, actual]=await Promise.all([
+   const [rows, recurring, summary]=await Promise.all([
     getCollection('budgets','?month='+month),getCollection('recurring-items'),api('/budget-summary?month='+month),
-    actualsEnabled?api('/actual-transactions?month='+month).then(actuals=>({actuals}),err=>({actualError:err.message})):null,
    ]);
    if (sequence!==loadSequence) return;
-   budgetView={rows,recurring,summary,...actual};
+   budgetView={rows,recurring,summary};
+  } else if(page==='actuals') {
+   const result=actualsEnabled?await api('/actual-transactions?month='+month)
+    .then(actuals=>({actuals}),err=>({error:err.message})):{};
+   if (sequence!==loadSequence) return;
+   actualView=result;
   } else if(page==='assets') {
    const [accounts, items, loans, snaps, summary]=await Promise.all([getCollection('accounts'),getCollection('asset-items'),getCollection('liabilities'),getCollection('asset-snapshots'),api('/assets?date='+month+'-'+new Date(Number(year),Number(month.slice(5)),0).getDate())]);
    const k=summary.by_currency.KRW;
@@ -410,7 +418,7 @@ async function render(focusFilter=null) {
   }
   const preferences=page==='settings'?settings:await api('/settings');
   const displayName=preferences.items.find(r=>r.key==='display_name')?.value || '나의 재무';
-  if(sequence===loadSequence) {workspace.innerHTML=page==='budgets'?budgetPage(budgetView):html;if(focusFilter) $('[data-filter='+focusFilter+']',workspace)?.focus();$('.brand > span:last-child').firstChild.nodeValue=displayName;}
+  if(sequence===loadSequence) {workspace.innerHTML=page==='budgets'?budgetPage(budgetView):page==='actuals'?actualPage(actualView):html;if(focusFilter) $('[data-filter='+focusFilter+']',workspace)?.focus();$('.brand > span:last-child').firstChild.nodeValue=displayName;}
  } catch(e) {if(sequence===loadSequence)message(e.message,true);} finally {if(sequence===loadSequence){$('#loading').hidden=true;workspace.removeAttribute('aria-busy');}}
 }
 async function openEditor(resource, id, flowType, parent=null) {
@@ -572,7 +580,7 @@ workspace.addEventListener('change',e=>{
   actualFilters[actualKey]=e.target.value?JSON.parse(e.target.value):null;
   if (actualKey==='category') actualFilters.subcategory=null;
   const details=$('#actual-details');
-  details.innerHTML=actualDetails(budgetView.actuals);
+  details.innerHTML=actualDetails(actualView.actuals);
   $(`[data-actual-filter="${actualKey}"]`,details)?.focus();
   return;
  }

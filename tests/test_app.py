@@ -34,7 +34,7 @@ def test_csrf_and_logout(client, send):
     assert client.get('/dashboard').headers['X-Frame-Options'] == 'DENY'
 
 
-@pytest.mark.parametrize('page', ['dashboard', 'budgets', 'assets', 'investments', 'dividends', 'history', 'settings'])
+@pytest.mark.parametrize('page', ['dashboard', 'budgets', 'actuals', 'assets', 'investments', 'dividends', 'history', 'settings'])
 def test_pages(client, page):
     r = client.get('/' + page)
     assert r.status_code == 200

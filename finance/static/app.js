@@ -443,25 +443,41 @@ function compareSpending(budgetRows,actualRows) {
  }));
  return {comparisons,pending:[...pending.values()]};
 }
-function spendingComparison(budgetRows,actualRows) {
+function spendingComparison(budgetRows,actualRows,notice='') {
+ const totals=new Map();
+ let income=0;
+ for (const row of budgetRows) {
+  const category=row.category?.trim() || '미분류';
+  const amount=Number(row.amount);
+  totals.set(category,(totals.get(category) ?? 0)+amount);
+  if (row.flow_type==='income') income+=amount;
+ }
+ const categories=Array.from(totals,([category,amount])=>({category,amount,income_share:incomeShare(amount,income)}));
+ const masked=percentOnly();
+ const overview=categories.length?table(categories,['category',masked?'income_share':'amount'])
+  :'<p class="caption">선택한 달에 등록된 예산 항목이 없습니다.</p>';
  const {comparisons,pending}=compareSpending(budgetRows,actualRows);
- const fields=percentOnly()?['category','subcategory','budget_ratio']
+ const fields=masked?['category','subcategory','budget_ratio']
   :['category','subcategory','budget_amount','actual_amount','budget_remaining','budget_ratio'];
- const matched=comparisons.length?table(comparisons,fields):'<p class="caption">비교할 수 있는 소비 분류가 없습니다.</p>';
+ const matched=comparisons.length?table(comparisons,fields):'<p class="caption">연결된 실제 소비가 없습니다.</p>';
  const review=pending.length?`<details class="spending-review"><summary>매칭 보류 · ${pending.length}개 분류</summary>
   ${table(pending,['category','subcategory','transaction_count'])}</details>`:'';
- return panel('예산 대비 지출',matched+review,'','선택한 달의 소비 예산과 분류가 확인된 실제 소비를 비교합니다.');
+ return panel('예산 대비 지출',`<div class="actual-table"><h3>예산 항목(1차)</h3>${overview}</div>
+  <div class="actual-table"><h3>연결된 실제 소비</h3>${notice || matched}${review}</div>`,'',
+  masked?'예산 항목의 비율은 선택한 달의 예산 수입을 기준으로 표시합니다.':'선택한 달의 예산과 연결된 실제 소비를 확인할 수 있습니다.');
 }
-function actualPage({actuals, error, budgetRows, budgetError}) {
- if (error) return panel('예산 대비 지출',`<p class="error">${esc(percentOnly()?'실제 수입·지출을 불러오지 못했습니다.':error)}</p>`);
- if (!actuals?.filename) {
+function actualPage({actuals, error, budgetRows=[], budgetError}) {
+ let notice='';
+ if (error) notice=`<p class="error">${esc(percentOnly()?'실제 수입·지출을 불러오지 못했습니다.':error)}</p>`;
+ else if (!actuals?.filename) {
   const help=actualsEnabled?'설정에서 최신 ClevMoney 백업을 가져오면 거래가 표시됩니다.':'서버에서 ClevMoney 백업 연동을 설정하면 사용할 수 있습니다.';
-  return panel('예산 대비 지출',`<p class="section-note">${help}</p>`,'<a href="/settings">설정으로 이동</a>');
+  notice=`<p class="section-note">${help}</p><a href="/settings">설정으로 이동</a>`;
  }
+ const comparison=budgetError?panel('예산 대비 지출','<p class="error">예산을 불러오지 못했습니다.</p>'+notice)
+  :spendingComparison(budgetRows,actuals?.filename?actuals.items:[],notice);
+ if (notice) return comparison;
  const income=actuals.totals.income;
  const totals=`실제 수입 ${budgetValue(income,income)} · 실제 소비 ${budgetValue(actuals.totals.expense,income)}`;
- const comparison=budgetError?panel('예산 대비 지출','<p class="error">예산을 불러오지 못했습니다.</p>')
-  :spendingComparison(budgetRows,actuals.items);
  return comparison+panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals,budgetRows)}</div>`,'',
   totals+(percentOnly()?'':' · 백업 '+actuals.filename));
 }
@@ -562,10 +578,10 @@ async function render(focusFilter=null) {
    if (sequence!==loadSequence) return;
    budgetView={rows,recurring,summary};
   } else if(page==='actuals') {
-   const [result,budget]=actualsEnabled?await Promise.all([
-    api('/actual-transactions?month='+month).then(actuals=>({actuals}),err=>({error:err.message})),
+   const [result,budget]=await Promise.all([
+    actualsEnabled?api('/actual-transactions?month='+month).then(actuals=>({actuals}),err=>({error:err.message})):{},
     api('/budgets?month='+month).then(budgetRows=>({budgetRows}),()=>({budgetError:true})),
-   ]):[{},{}];
+   ]);
    if (sequence!==loadSequence) return;
    actualView={...result,...budget};
   } else if(page==='assets') {

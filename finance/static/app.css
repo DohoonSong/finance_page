@@ -79,3 +79,15 @@
 }
 
 .bar-row.negative progress { accent-color: var(--red); }
+
+.asset-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.loan-disclosure > summary {
+ width: fit-content;
+ margin-bottom: 1rem;
+ padding: .65rem .85rem;
+ border: 1px solid var(--line);
+ border-radius: 8px;
+ background: var(--surface);
+ cursor: pointer;
+ font-weight: 600;
+}

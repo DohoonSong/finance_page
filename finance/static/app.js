@@ -337,14 +337,15 @@ async function render(focusFilter=null) {
   } else if(page==='assets') {
    const [accounts, items, loans, snaps, summary]=await Promise.all([getCollection('accounts'),getCollection('asset-items'),getCollection('liabilities'),getCollection('asset-snapshots'),api('/assets?date='+month+'-'+new Date(Number(year),Number(month.slice(5)),0).getDate())]);
    const k=summary.by_currency.KRW;
-   html=`<div class="cards">${card('순자산',money(k.net_worth),'선택 월말 기준',true)}${card('일반 자산 + 투자',money(k.assets_total),'KRW')}${card('기록된 총부채',money(k.liabilities_total),'월말 잔액 기록 기준')}${card('등록 자산',items.length+'개','투자 계좌는 보유종목으로 관리')}</div>`;
+   html=`<div class="cards asset-cards">${card('일반 자산 + 투자',money(k.assets_total),'선택 월말 기준 · KRW',true)}${card('등록 자산',items.length+'개','투자 계좌는 보유종목으로 관리')}</div>`;
    const assetEdit=items.length?`<label>자산 항목 수정 <select id="asset-to-edit">${selectOptions(items.map(item=>[item.asset_id,item.name]),'','선택하세요')}</select></label>
     <button data-action="edit-asset-item" ${writable?'':'disabled'}>수정</button>`:'';
    html+=panel('자산 잔액 기록',table(snaps,['date','asset_id','amount','note'],'asset-snapshots'),button('asset-items')+button('asset-snapshots')+assetEdit);
    const lease=table([summary.lease_budget],['lease_deposit','lease_repayment','lease_total']);
-   html+=panel('대출',table(loans,['name','original_principal','annual_rate','maturity_date'],'liabilities')
+   const loanPanel=panel('대출',table(loans,['name','original_principal','annual_rate','maturity_date'],'liabilities')
     +`<h3 class="lease-budget-heading">전세 계산 잔액</h3>${lease}`,button('liabilities'),
     '선택 월 예산의 전세금과 전세 상환금을 합산합니다. 연이율은 % 단위로 입력하세요.');
+   html+=`<details class="loan-disclosure"><summary>대출 보기</summary>${loanPanel}</details>`;
   } else if(page==='investments') {
    const [accounts, holdings, gains]=await Promise.all([getCollection('accounts'),getCollection('holdings'),getCollection('realized-gains')]);
    if (sequence!==loadSequence) return;

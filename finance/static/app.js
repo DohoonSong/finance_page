@@ -3,7 +3,7 @@ const $ = (s, root = document) => root.querySelector(s);
 const workspace = $('#workspace');
 const page = document.body.dataset.page;
 const tossCategories = JSON.parse(document.body.dataset.tossCategories);
-const filters = {budget:[null,null,null], account:'', category:'', holdingName:'', dividendSymbol:'', dividendMonth:''};
+const filters = {budget:[null,null], account:'', category:'', holdingName:'', dividendSymbol:'', dividendMonth:''};
 const actualsEnabled = document.body.dataset.actuals==='true';
 const writable = document.body.dataset.writes === 'true';
 if (['investments','settings'].includes(page)) $('.month-picker').hidden=true;
@@ -137,12 +137,14 @@ function budgetCategoryTotals(rows) {
 }
 const isBudgetOutflow = row => ['expense','investment','debt_principal'].includes(row.flow_type);
 const incomeShare = (amount,income) => income>0?Number(amount)/income:null;
-const budgetLevels=['category','category_2','category_3'];
+const budgetLevels=['category','category_2'];
+const budgetSecond = row => row.category_2 || row.item;
+const budgetLevel = (row,level) => level===0?(row.category || ''):budgetSecond(row);
 function budgetFilterButtons(rows) {
  let candidates=rows.filter(row=>row.flow_type!=='income');
  const groups=[];
- for (const [level,field] of budgetLevels.entries()) {
-  const options=[...new Set(candidates.map(row=>row[field] || ''))].sort((a,b)=>a.localeCompare(b,'ko'));
+ for (const level of budgetLevels.keys()) {
+  const options=[...new Set(candidates.map(row=>budgetLevel(row,level)))].sort((a,b)=>a.localeCompare(b,'ko'));
   if (!options.includes(filters.budget[level])) filters.budget[level]=null;
   if (!options.length || (level>0 && (filters.budget[level-1]===null || !options.some(Boolean)))) {
    filters.budget[level]=null;
@@ -152,15 +154,46 @@ function budgetFilterButtons(rows) {
   groups.push(`<div class="budget-filters" role="group" aria-label="${level+1}차 분류"><span class="budget-filter-label">${level+1}차</span>${choices.map(([value,label])=>
    `<button type="button" data-budget-filter="${level}" data-all="${value===null}" value="${esc(value)}" aria-pressed="${filters.budget[level]===value}">${esc(label)}</button>`
   ).join('')}</div>`);
-  if (filters.budget[level]!==null) candidates=candidates.filter(row=>(row[field] || '')===filters.budget[level]);
+  if (filters.budget[level]!==null) candidates=candidates.filter(row=>budgetLevel(row,level)===filters.budget[level]);
  }
  return groups.join('');
 }
+function budgetRowActions(row) {
+ return `<button data-edit="budgets" data-id="${esc(row.budget_id)}" ${writable?'':'disabled'}>수정</button>
+  <button data-delete="${esc(row.budget_id)}" ${writable?'':'disabled'}>삭제</button>`;
+}
 function budgetDetailTable(rows, income) {
- const visible=rows.filter(row=>row.flow_type!=='income' && budgetLevels.every((field,level)=>
-  filters.budget[level]===null || (row[field] || '')===filters.budget[level]));
- const details=visible.map(row=>({...row,income_share:isBudgetOutflow(row)?incomeShare(row.amount,income):null}));
- return table(details,[...budgetLevels,'item','flow_type','amount','income_share','note'],'budgets');
+ const visible=rows.filter(row=>row.flow_type!=='income' && budgetLevels.every((_,level)=>
+  filters.budget[level]===null || budgetLevel(row,level)===filters.budget[level]));
+ if (!visible.length) return empty();
+ const groups=new Map();
+ for (const row of visible) {
+  const key=JSON.stringify([row.category,budgetSecond(row),row.flow_type]);
+  if (!groups.has(key)) groups.set(key,[]);
+  groups.get(key).push(row);
+ }
+ const sections=Array.from(groups.values(),(entries,index)=>{
+  const first=entries[0], title=budgetSecond(first), branchId='budget-branch-'+index;
+  const branches=entries.filter(row=>row.category_3);
+  const parents=entries.filter(row=>!row.category_3);
+  const amount=entries.reduce((sum,row)=>sum+Number(row.amount),0);
+  const share=value=>isBudgetOutflow(first)?display({income_share:incomeShare(value,income)},'income_share'):'—';
+  const titleCell=branches.length
+   ?`<button type="button" class="budget-tree-toggle" aria-expanded="false" aria-controls="${branchId}" data-budget-toggle><span aria-hidden="true"></span>${esc(title)}</button>`
+   :`<span class="budget-tree-leaf">${esc(title)}</span>`;
+  const add=`<button data-add-budget-child="${esc(first.budget_id)}" ${writable?'':'disabled'}>+ 3차</button>`;
+  const parent=`<tbody><tr><td>${esc(display(first,'category'))}</td><th scope="row">${titleCell}</th>
+   <td>${esc(display(first,'flow_type'))}</td><td>${money(amount)}</td><td>${share(amount)}</td>
+   <td>${esc(parents.map(row=>row.note).filter(Boolean).join(' / ') || '—')}</td>
+   <td>${parents.map(budgetRowActions).join('')}${add}</td></tr></tbody>`;
+  const children=branches.map(row=>`<tr class="budget-tree-child"><td></td>
+   <th scope="row"><span aria-hidden="true">↳ </span>${esc(row.category_3)}</th>
+   <td>${esc(display(row,'flow_type'))}</td><td>${money(row.amount)}</td><td>${share(row.amount)}</td>
+   <td>${esc(display(row,'note'))}</td><td>${budgetRowActions(row)}</td></tr>`).join('');
+  return parent+(branches.length?`<tbody id="${branchId}" hidden>${children}</tbody>`:'');
+ }).join('');
+ return `<div class="table-wrap"><table><thead><tr>${['1차 분류','2차 항목','흐름','금액','수입 대비','메모','관리'].map(label=>
+  `<th scope="col">${label}</th>`).join('')}</tr></thead>${sections}</table></div>`;
 }
 async function render(focusFilter=null) {
  const sequence=++loadSequence;
@@ -194,7 +227,8 @@ async function render(focusFilter=null) {
    html+=panel('월별 예산 항목',table(expenseTotals,['category','amount','income_share']),'',
     '소비·투자 배분·원금 상환의 수입 대비 비중입니다. 계좌 이체는 상세에서 확인할 수 있습니다.');
    html+=panel('상세 예산 항목',`<div id="budget-filters">${budgetFilterButtons(rows)}</div>`+`<div id="budget-details" data-income="${esc(summary.income)}">${budgetDetailTable(rows,summary.income)}</div>`,
-    `<button data-action="copy" ${writable?'':'disabled'}>다른 월에서 복사</button>${button('budgets')}`);
+    `<button data-action="copy" ${writable?'':'disabled'}>다른 월에서 복사</button>${button('budgets')}`,
+    '2차 금액은 직접 입력한 금액과 3차 항목의 합계입니다. 기존 금액을 나눌 때는 2차 금액도 함께 조정하세요.');
    if (actualsEnabled) {
     try {
      const actuals=await api('/actual-transactions?month='+month);
@@ -266,12 +300,13 @@ async function render(focusFilter=null) {
   if(sequence===loadSequence) {workspace.innerHTML=html;if(focusFilter) $('[data-filter='+focusFilter+']',workspace)?.focus();$('.brand > span:last-child').firstChild.nodeValue=displayName;}
  } catch(e) {if(sequence===loadSequence)message(e.message,true);} finally {if(sequence===loadSequence){$('#loading').hidden=true;workspace.removeAttribute('aria-busy');}}
 }
-async function openEditor(resource, id, flowType) {
+async function openEditor(resource, id, flowType, parent=null) {
  const record=id?collections[resource]?.find(r=>r[idKeys[resource]]===id):null;
  for(const related of ['accounts','asset-items','liabilities']) if(schemas[resource].some(k=>({accounts:'account_id','asset-items':'asset_id',liabilities:'loan_id'}[related])===k) && !collections[related]) await getCollection(related);
  editor={resource,record};
  $('#editor-title').textContent=titles[resource]+(record?' 수정':' 추가');
  $('#editor-error').textContent='';
+ const detailBudget=resource==='budgets' && (record?.flow_type ?? flowType)!=='income';
  const investment=schemas[resource].includes('investment_category');
  $('#editor-fields').innerHTML=schemas[resource].map(key=>{
   if(key==='investment_category') {
@@ -282,18 +317,26 @@ async function openEditor(resource, id, flowType) {
    return `<label hidden>${label}<select name="${field}" data-toss-group disabled>${selectOptions(tossCategories.map(c=>[c,c]),saved,'미분류')}</select></label>`
     +(holding?`<label hidden>${label}<input name="${field}" data-custom-group maxlength="200" value="${esc(saved)}" disabled></label>`:'');
   }
+  if(detailBudget && key==='item') return '';
   if((flowType==='income' || record?.flow_type==='income') && ['category_2','category_3'].includes(key)) return '';
   let value=record?.[key] ?? ({active:true,currency:investment?(accountById(filters.account)?.currency || 'KRW'):'KRW',account_id:investment?filters.account:'',flow_type:flowType ?? (resource==='budgets'?'expense':undefined),category:resource==='budgets' && flowType!=='income'?(filters.budget[0] ?? ''):'',category_2:filters.budget[1] ?? '',category_3:filters.budget[2] ?? '',month:monthInput.value,start_month:monthInput.value,date:today(),payment_date:today(),trade_date:today(),start_date:today(),tax_amount:0}[key] ?? '');
+  if (detailBudget) {
+   if (key==='category') value=parent?.category ?? value;
+   if (key==='category_2') value=parent?budgetSecond(parent):record?budgetSecond(record):value;
+   if (key==='category_3' && record===null) value='';
+  }
   if (key==='annual_rate' && value!=='') value=shiftRate(value,2);
   let choices=key==='type'?['bank','cash','brokerage','retirement','other']:key==='currency'?['KRW','USD']:key==='active'?['true','false']:key==='flow_type'?['income','expense','investment','transfer','debt_principal']:key==='category'&&resource==='asset-items'?['cash','deposit','property','other']:null;
   let options=choices?.map(c=>[c,words[c] || c]);
   const fk={account_id:'accounts',asset_id:'asset-items',loan_id:'liabilities'}[key];
   if(fk) options=(collections[fk] || []).filter(r=>!investment || key!=='account_id' || investmentAccount(r)).map(r=>[r[idKeys[fk]],r.name]);
-  const optional=['note','institution','end_month','category_2','category_3'].includes(key), required=optional?'':'required';
+  const optional=['note','institution','end_month'].includes(key) || (key==='category_3' && !parent);
+  const required=optional?'':'required';
   let field;
   if(options)field=`<select name="${key}" ${required}>${fk?'<option value="">선택하세요</option>':''}${options.map(([v,label])=>`<option value="${esc(v)}" ${String(value)===String(v)?'selected':''}>${esc(label)}</option>`).join('')}</select>`;
   else {const type=numeric.has(key)?'number':key.includes('month')?'month':(key==='date'||key.endsWith('_date'))?'date':'text';field=`<input name="${key}" type="${type}" value="${esc(value)}" ${required} ${type==='number'?`step="${key==='annual_rate'?'any':'1'}" ${key==='profit'?'':'min="0"'} ${key==='annual_rate'?'max="100"':''}`:''} ${type==='text'?`maxlength="${key==='note'?1000:200}"`:''}>`;}
-  return `<label>${esc(labels[key] || key)}${field}</label>`;
+  const label=detailBudget && key==='category'?'1차 분류':detailBudget && key==='category_2'?'2차 항목':labels[key] || key;
+  return `<label>${esc(label)}${field}</label>`;
  }).join('');
  if(investment) {
   const account=$('[name="account_id"]',$('#editor-fields'));
@@ -321,6 +364,9 @@ $('#editor-close').onclick=$('#editor-cancel').onclick=()=>$('#editor').close();
 $('#editor-form').addEventListener('submit',async e=>{
  e.preventDefault();const save=$('#editor-save');save.disabled=true;$('#editor-error').textContent='';
  try {const data=Object.fromEntries(new FormData(e.target));for(const k in data){if(numeric.has(k))data[k]=Number(data[k]);if(k==='active')data[k]=data[k]==='true';}data.expected_version=editor.record?Number(editor.record.version):0;
+  if (editor.resource==='budgets' && 'category_2' in data) {
+   data.item=editor.record?.item || data.category_2;
+  }
   if ('annual_rate' in data) {
    const original=editor.record?.annual_rate;
    data.annual_rate=original != null && original!=='' && data.annual_rate===shiftRate(original,2)
@@ -332,6 +378,12 @@ $('#editor-form').addEventListener('submit',async e=>{
 });
 workspace.addEventListener('click',async e=>{
  const el=e.target.closest('button');if(!el || el.disabled)return;
+ if ('budgetToggle' in el.dataset) {
+  const expanded=el.getAttribute('aria-expanded')==='true';
+  el.setAttribute('aria-expanded',String(!expanded));
+  document.getElementById(el.getAttribute('aria-controls')).hidden=expanded;
+  return;
+ }
  if (el.dataset.budgetFilter) {
   if (workspace.hasAttribute('aria-busy')) return;
   const level=Number(el.dataset.budgetFilter);
@@ -347,6 +399,10 @@ workspace.addEventListener('click',async e=>{
  el.disabled=true;
  try {
   if(el.dataset.add) await openEditor(el.dataset.add,null,el.dataset.flowType);
+  else if(el.dataset.addBudgetChild){
+   const parent=collections.budgets.find(row=>row.budget_id===el.dataset.addBudgetChild);
+   if(parent) await openEditor('budgets',null,parent.flow_type,parent);
+  }
   else if(el.dataset.edit) await openEditor(el.dataset.edit,el.dataset.id);
   else if(el.dataset.delete){const row=collections.budgets.find(r=>r.budget_id===el.dataset.delete);if(confirm(`“${row.item}” 예산을 삭제할까요?`)){await api('/budgets/'+row.budget_id,'DELETE',{expected_version:Number(row.version)});message('삭제했습니다.');await render();}}
   else if(el.dataset.action==='copy'){const source=prompt('복사할 원본 월 (YYYY-MM)');if(source){await api('/budgets/'+monthInput.value+'/copy','POST',{source_month:source,expected_version:0});message('예산을 복사했습니다.');await render();}}

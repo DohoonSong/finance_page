@@ -38,8 +38,8 @@
  padding: .25rem .4rem;
  font-size: inherit;
 }
-.budget-tree-toggle span::before { content: "▸"; }
-.budget-tree-toggle[aria-expanded="true"] span::before { content: "▾"; }
+.budget-tree-toggle > span[aria-hidden="true"]::before { content: "▸"; }
+.budget-tree-toggle[aria-expanded="true"] > span[aria-hidden="true"]::before { content: "▾"; }
 .budget-tree-leaf { padding-left: 1.25rem; }
 .budget-tree-child th {
  padding-left: 1.5rem;
@@ -70,6 +70,7 @@
  border: 0;
  text-align: left;
 }
+.budget-tree-category small { margin-left: .35rem; }
 .budget-tree-root-toggle strong {
  margin-left: auto;
 }
@@ -218,6 +219,7 @@
  padding: .65rem;
 }
 .amount-batch-row > p { grid-column: 1 / -1; margin: 0; }
+.amount-batch-date { grid-column: 1 / -1; }
 
 .dividend-account-heading { display: flex; gap: .75rem; align-items: center; justify-content: space-between; margin-bottom: .5rem; }
 .dividend-account-heading > h3 { margin: 0; }

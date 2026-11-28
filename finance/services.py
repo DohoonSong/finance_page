@@ -441,6 +441,7 @@ def update_amount_batch(repo, rid, table, rows):
     identifier_key = SCHEMA[table][0]
     amounts = ('gross_amount', 'tax_amount') if dividends else ('cost_basis', 'market_value')
     fields = {identifier_key, 'expected_version', *amounts}
+    allowed = fields | {'payment_date'} if dividends else fields
     if not isinstance(rows, list) or not rows:
         raise AppError(f'수정할 {label} 항목을 입력하세요.')
 
@@ -453,7 +454,7 @@ def update_amount_batch(repo, rid, table, rows):
         stamp = now()
         for index, row in enumerate(rows, 1):
             try:
-                if not isinstance(row, dict) or set(row) != fields:
+                if not isinstance(row, dict) or not fields <= row.keys() <= allowed:
                     raise AppError('항목 ID, 버전과 금액 필드가 필요합니다.')
                 identifier = row[identifier_key]
                 if not isinstance(identifier, str) or identifier in seen:
@@ -480,7 +481,11 @@ def update_amount_batch(repo, rid, table, rows):
                     if type(gross) is not int or type(tax) is not int:
                         raise AppError('총배당과 세금은 정수여야 합니다.')
                     payload['net_amount'] = gross - tax
+                    if 'payment_date' in row:
+                        payload['payment_date'] = row['payment_date']
                 record = validate_record(table, payload, data, existing)
+                if record.get('payment_date') != existing.get('payment_date'):
+                    assert_open(data, table, record)
             except AppError as exc:
                 raise AppError(f'{index}번째 {label}: {exc}', exc.status, exc.code) from exc
             updated = {**existing, **record, 'version': version + 1, 'updated_at': stamp}

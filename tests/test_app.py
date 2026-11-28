@@ -484,3 +484,27 @@ def test_dividend_amount_batch_is_account_scoped_and_atomic(send, client):
     assert update(items[1:2]).status_code == 200
     assert [(row['net_amount'], row['version'], row['dividend_group']) for row in records()] == [
         (60, 2, 'ISA'), (60, 2, 'ISA'), (90, 1, 'ISA')]
+
+
+def test_dividend_batch_payment_date_respects_closing_and_refreshes_summary(send, client):
+    broker = add(send, 'accounts', name='ISA', type='brokerage', currency='KRW')
+    dividend = add(send, 'dividends', account_id=broker['account_id'], payment_date='2026-11-11',
+                   gross_amount=100, tax_amount=10, net_amount=90, currency='KRW')
+    preview = send('/closings/2026-10/preview', {}).json['data']
+    assert send('/closings/2026-10/finalize', {
+        'expected_version': 0, 'data_hash': preview['data_hash'],
+    }).status_code == 200
+    item = {'dividend_id': dividend['dividend_id'], 'expected_version': 1,
+            'gross_amount': 100, 'tax_amount': 10}
+
+    def change(date):
+        return send('/dividends/batch', {'items': [{**item, 'payment_date': date}]}, 'PATCH')
+
+    assert change('2026-11-31').status_code == 422
+    blocked = change('2026-10-20')
+    assert blocked.status_code == 409
+    assert blocked.json['error']['code'] == 'period_closed'
+    assert change('2026-12-03').status_code == 200
+    summary = client.get('/api/v1/dividend-summary?year=2026').json['data']
+    assert [(row['month'], row['isa_gross_amount'], row['net_amount']) for row in summary] == [
+        ('2026-12', 100, 90)]

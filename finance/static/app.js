@@ -232,7 +232,9 @@ function budgetDetailTable(rows, income) {
   const amount=outflows.reduce((sum,row)=>sum+Number(row.amount),0);
   return `<section class="budget-tree-root">
    <button type="button" class="budget-tree-toggle budget-tree-root-toggle" aria-expanded="false" aria-controls="${branchId}" data-budget-toggle>
-    <span aria-hidden="true"></span>${esc(category || '미분류')} <strong>${outflows.length?budgetValue(amount,income):''}</strong>
+    <span aria-hidden="true"></span><span class="budget-tree-category">${esc(category || '미분류')}
+     <small>수입 대비 ${percentage(outflows.length?incomeShare(amount,income):null)}</small></span>
+    ${outflows.length && !percentOnly()?`<strong>${money(amount)}</strong>`:''}
    </button>
    <div id="${branchId}" hidden>${budgetSecondLevel(entries,income,branchId)}</div>
   </section>`;
@@ -675,7 +677,9 @@ function openAmountBatch(resource,rows,title) {
   <p class="caption">현재 필터에 해당하는 ${rows.length}건입니다. ${dividends?'순배당은 총배당에서 세금을 빼서 계산합니다.':'기준일을 확인하고 바꿀 금액을 입력하세요.'}</p>
   ${rows.map((row,index)=>`<fieldset class="amount-batch-row" data-amount-index="${index}">
    <legend>${esc(dividends?(row.symbol || row.dividend_group || '배당'):`${row.name} (${row.symbol})`)}</legend>
-   <p class="caption">${esc(dividends?row.payment_date:row.date)} · ${esc(accountById(row.account_id)?.name || row.account_id)} · ${esc(row.currency)}</p>
+   <p class="caption">${dividends?'':esc(row.date)+' · '}${esc(accountById(row.account_id)?.name || row.account_id)} · ${esc(row.currency)}</p>
+   ${dividends?`<label class="amount-batch-date">지급일<input name="payment_date" type="date"
+    value="${esc(row.payment_date)}" required></label>`:''}
    ${amounts.map(key=>`<label>${labels[key]}<input name="${key}" type="number"
     min="0" max="9000000000000" step="1" value="${esc(row[key])}" required></label>`).join('')}
   </fieldset>`).join('')}
@@ -689,12 +693,14 @@ async function saveAmountBatch(form) {
  for (const fields of form.querySelectorAll('[data-amount-index]')) {
   const row=rows[Number(fields.dataset.amountIndex)];
   const values=Object.fromEntries(amounts.map(key=>[key,$(`[name="${key}"]`,fields).valueAsNumber]));
-  if (amounts.some(key=>values[key]!==Number(row[key]))) {
+  const date=$('[name="payment_date"]',fields);
+  if (date && date.value!==row.payment_date) values.payment_date=date.value;
+  if ('payment_date' in values || amounts.some(key=>values[key]!==Number(row[key]))) {
    items.push({[idKey]:row[idKey],expected_version:Number(row.version),...values});
   }
  }
  if (!items.length) {
-  $('#editor-error').textContent='변경한 금액이 없습니다.';
+  $('#editor-error').textContent='변경한 항목이 없습니다.';
   return;
  }
  const result=await api('/'+resource+'/batch','PATCH',{items});

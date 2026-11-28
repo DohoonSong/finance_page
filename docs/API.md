@@ -64,6 +64,6 @@
 
 보유종목 금액 일괄 수정의 각 `items` 항목에는 `holding_id`, `expected_version`, `cost_basis`, `market_value`가 필요합니다. 유효하지 않거나 마감됐거나 버전이 달라진 스냅샷이 하나라도 있으면 요청 전체가 거부됩니다.
 
-배당 금액 일괄 수정의 각 `items` 항목에는 `dividend_id`, `expected_version`, `gross_amount`, `tax_amount`가 필요합니다. 순배당은 총배당에서 세금을 빼서 계산하며 한 계좌의 금액을 함께 저장합니다.
+배당 금액 일괄 수정의 각 `items` 항목에는 `dividend_id`, `expected_version`, `gross_amount`, `tax_amount`가 필요합니다. 선택 필드 `payment_date`로 지급일을 변경할 수 있습니다. 기존 지급일과 변경할 지급일 모두 마감 검사를 적용합니다. 순배당은 총배당에서 세금을 빼서 계산합니다.
 
 배당 일괄 등록의 각 `items` 항목에는 `account_id`, `gross_amount`, 선택 필드 `dividend_group`을 전달합니다. 통화는 계좌에서 가져오며 세금은 0원, 종목은 비어 있는 상태로 저장합니다. 유효하지 않은 항목이 있으면 요청 전체가 거부됩니다.

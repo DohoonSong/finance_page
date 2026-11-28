@@ -338,41 +338,47 @@ function actualFilterButtons(key, label, rows) {
    value="${esc(value)}" aria-pressed="${actualFilters[key]===value}">${esc(name)}</button>`).join('')}
  </div>`;
 }
-function actualExpenseGroups(rows, fields, income) {
+function actualExpenseGroups(rows, fields, income, budgetRows) {
  const categories=new Map();
  for (const row of rows) {
   const category=row.category || '';
   const subcategory=row.subcategory || '';
-  if (!categories.has(category)) categories.set(category,{amount:0,subgroups:new Map()});
+  if (!categories.has(category)) categories.set(category,{amount:0,comparable:0,subgroups:new Map()});
   const group=categories.get(category);
   if (!group.subgroups.has(subcategory)) group.subgroups.set(subcategory,{amount:0,rows:[]});
   const subgroup=group.subgroups.get(subcategory);
   const amount=Number(row.amount);
   group.amount+=amount;
+  if (spendingSource(category,subcategory)===category.trim()) group.comparable+=amount;
   subgroup.amount+=amount;
   subgroup.rows.push(row);
  }
  const detailsFields=fields.filter(field=>field!=='category' && field!=='subcategory');
- return Array.from(categories,([category,group])=>`<details class="actual-expense-group" open>
-  <summary><span class="actual-expense-line"><span>${esc(category || '미분류')}</span><strong>${budgetValue(group.amount,income)}</strong></span></summary>
+ return Array.from(categories,([category,group])=>{
+  const rule=spendingRules.get(category.trim());
+  const budget=rule && spendingBudget(budgetRows,rule);
+  const ratio=rule?`<span class="caption">${esc(rule.label)} 대비 ${percentage(incomeShare(group.comparable,budget))}</span>`:'';
+  return `<details class="actual-expense-group">
+  <summary><span class="actual-expense-line"><span>${esc(category || '미분류')}</span>${rule && percentOnly()?'':`<strong>${budgetValue(group.amount,income)}</strong>`}${ratio}</span></summary>
   ${Array.from(group.subgroups,([subcategory,subgroup])=>`<details class="actual-expense-detail">
    <summary><span class="actual-expense-line"><span>${esc(subcategory || '미분류')}</span>
     <strong>${budgetValue(subgroup.amount,income)}</strong></span></summary>
    ${table(subgroup.rows,detailsFields)}
   </details>`).join('')}
- </details>`).join('');
+ </details>`;
+ }).join('');
 }
-function actualExpenseDetails(rows, fields, income) {
+function actualExpenseDetails(rows, fields, income, budgetRows) {
  const categories=actualFilterButtons('category','1차 소비 분류',rows);
  const grouped=rows.filter(row=>actualFilters.category===null || (row.category || '')===actualFilters.category);
  let subcategories='';
  if (actualFilters.category===null) actualFilters.subcategory=null;
  else subcategories=actualFilterButtons('subcategory','2차 소비 분류',grouped);
  const visible=grouped.filter(row=>actualFilters.subcategory===null || (row.subcategory || '')===actualFilters.subcategory);
- const content=visible.length?actualExpenseGroups(visible,fields,income):'<p class="caption">표시할 거래가 없습니다.</p>';
+ const content=visible.length?actualExpenseGroups(visible,fields,income,budgetRows):'<p class="caption">표시할 거래가 없습니다.</p>';
  return categories+subcategories+content;
 }
-function actualDetails(actuals) {
+function actualDetails(actuals, budgetRows=[]) {
  const income=actuals.totals.income;
  const rows=actuals.items.map(row=>({...row,
   date:row.date.endsWith('-50')?row.date.slice(0,7)+' (일자 미확정)':row.date,
@@ -382,65 +388,56 @@ function actualDetails(actuals) {
  const fields=percentOnly()
   ?['date','category','subcategory','income_share']
   :['date','category','subcategory','item','amount','payment_method','note'];
- return [['income','실제 수입'],['expense','실제 소비'],['transfer','계좌 이체']]
+ return [['expense','실제 소비'],['income','실제 수입'],['transfer','계좌 이체']]
   .map(([flow,label])=>{
    const matching=rows.filter(row=>row.flow_type===flow);
    if (flow==='transfer' && !matching.length) return '';
-   const content=flow==='expense'?actualExpenseDetails(matching,fields,income)
+   const content=flow==='expense'?actualExpenseDetails(matching,fields,income,budgetRows)
     :matching.length?table(matching,fields):'<p class="caption">표시할 거래가 없습니다.</p>';
    return `<section class="actual-table"><h3>${label}</h3>${content}</section>`;
   }).join('');
 }
-// Reviewed pairs use both source levels; unlisted pairs await confirmation.
-const spendingMappings=[
- ['식비',['식사/간식','커피/음료','식재료','배달음식','술'],['생활/소비','식비']],
-];
 const spendingPath=(category,subcategory)=>JSON.stringify([category?.trim() || '',subcategory?.trim() || '']);
 const excludedSpending=new Set(['정산','기타/고정비'].map(category=>spendingPath(category,'법카')));
-const spendingTargets=new Map(spendingMappings.flatMap(([category,subcategories,target])=>
- subcategories.map(subcategory=>[spendingPath(category,subcategory),spendingPath(...target)])));
-function spendingTarget(category,subcategory) {
- if (category==='헌금' || subcategory==='헌금') return spendingPath('헌금','전체');
- if (category==='문화생활비' || category==='쇼핑비') return spendingPath('생활/소비','취미/쇼핑');
- if (category==='기타/고정비') return spendingPath('생활/소비','');
- return spendingTargets.get(spendingPath(category,subcategory));
+const spendingRules=new Map([
+ ['문화생활비',{label:'취미/쇼핑 - 취미', match:(row,second,third)=>second==='취미/쇼핑' && third==='취미'}],
+ ['식비',{label:'식비', match:(row,second)=>second==='식비'}],
+ ['기타/고정비',{label:'고정비 + 주거비 + 헌금', match:row=>
+  ['고정비','주거비','고정비/주거비','헌금'].includes(row.category?.replace(/\s+/g,''))}],
+ ['쇼핑비',{label:'취미/쇼핑 - 쇼핑(생활)', match:(row,second,third)=>second==='취미/쇼핑' && third==='쇼핑(생활)'}],
+ ['헌금',{label:'헌금', match:row=>row.category?.trim()==='헌금'}],
+]);
+function spendingSource(category,subcategory) {
+ if (excludedSpending.has(spendingPath(category,subcategory))) return null;
+ return subcategory.trim()==='헌금'?'헌금':category.trim();
+}
+function spendingBudget(rows,rule) {
+ const matching=rows.filter(row=>row.flow_type==='expense' && rule.match(
+  row,budgetSecond(row)?.trim(),(row.category_3 || row.item)?.trim(),
+ ));
+ return matching.length?matching.reduce((sum,row)=>sum+Number(row.amount),0):null;
 }
 function compareSpending(budgetRows,actualRows) {
  const budgets=new Map(), pending=new Map();
- for (const row of budgetRows) {
-  if (row.flow_type!=='expense') continue;
-  const category=row.category?.trim() || '';
-  const subcategory=category==='헌금'?'전체':budgetSecond(row);
-  const key=spendingPath(category,subcategory);
-  if (!budgets.has(key)) budgets.set(key,{category,subcategory,budget_amount:0,actual_amount:0,matched:false});
-  budgets.get(key).budget_amount+=Number(row.amount);
- }
- const livingBudgets=[...budgets.values()].filter(row=>row.category==='생활/소비');
- const livingTotal=livingBudgets.length?{category:'생활/소비',subcategory:'전체',
-  budget_amount:livingBudgets.reduce((total,row)=>total+row.budget_amount,0),
-  actual_amount:0,matched:false}:null;
  for (const row of actualRows) {
   if (row.flow_type!=='expense') continue;
   const category=row.category?.trim() || '', subcategory=row.subcategory?.trim() || '';
   const key=spendingPath(category,subcategory);
-  if (excludedSpending.has(key)) continue;
-  const targetKey=spendingTarget(category,subcategory);
-  const target=targetKey===spendingPath('생활/소비','')?livingTotal:budgets.get(targetKey);
-  if (target) {
-   target.actual_amount+=Number(row.amount);
-   target.matched=true;
-  } else {
+  const source=spendingSource(category,subcategory);
+  if (source===null) continue;
+  const rule=spendingRules.get(source);
+  if (rule && !budgets.has(source)) {
+   const budget_amount=spendingBudget(budgetRows,rule);
+   if (budget_amount!==null) budgets.set(source,{category:source,subcategory:rule.label,budget_amount,actual_amount:0});
+  }
+  const target=budgets.get(source);
+  if (target) target.actual_amount+=Number(row.amount);
+  else {
    if (!pending.has(key)) pending.set(key,{category:row.category || '미분류',subcategory:row.subcategory || '미분류',transaction_count:0});
    pending.get(key).transaction_count++;
   }
  }
- const comparisonRows=[...budgets.values()];
- if (livingTotal?.matched) {
-  // The subtotal includes matched detail rows plus expenses assigned directly to the category.
-  livingTotal.actual_amount+=livingBudgets.reduce((total,row)=>total+row.actual_amount,0);
-  comparisonRows.splice(comparisonRows.indexOf(livingBudgets[0]),0,livingTotal);
- }
- const comparisons=comparisonRows.filter(row=>row.matched).map(row=>({...row,
+ const comparisons=[...budgets.values()].map(row=>({...row,
   budget_remaining:row.budget_amount-row.actual_amount,
   budget_ratio:incomeShare(row.actual_amount,row.budget_amount),
  }));
@@ -465,7 +462,7 @@ function actualPage({actuals, error, budgetRows, budgetError}) {
  const totals=`실제 수입 ${budgetValue(income,income)} · 실제 소비 ${budgetValue(actuals.totals.expense,income)}`;
  const comparison=budgetError?panel('예산 대비 지출','<p class="error">예산을 불러오지 못했습니다.</p>')
   :spendingComparison(budgetRows,actuals.items);
- return comparison+panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals)}</div>`,'',
+ return comparison+panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals,budgetRows)}</div>`,'',
   totals+(percentOnly()?'':' · 백업 '+actuals.filename));
 }
 function budgetSpendingComposition(rows,summary) {
@@ -888,7 +885,7 @@ workspace.addEventListener('click',async e=>{
   actualFilters[key]=el.dataset.all==='true'?null:el.value;
   if (key==='category') actualFilters.subcategory=null;
   const details=$('#actual-details');
-  details.innerHTML=actualDetails(actualView.actuals);
+  details.innerHTML=actualDetails(actualView.actuals,actualView.budgetRows);
   $(`[data-actual-filter="${key}"][aria-pressed="true"]`,details)?.focus({preventScroll:true});
   return;
  }

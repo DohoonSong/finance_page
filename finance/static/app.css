@@ -110,6 +110,8 @@
  gap: .75rem;
 }
 .actual-expense-line strong { flex-shrink: 0; }
+.actual-expense-group > summary .actual-expense-line { flex-wrap: wrap; }
+.actual-expense-group .actual-expense-line > .caption { margin-left: auto; text-align: right; }
 .actual-expense-group > summary {
  margin: 0;
  padding: .65rem .75rem;

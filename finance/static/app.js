@@ -632,10 +632,60 @@ async function render(focusFilter=null) {
   }$('.brand > span:last-child').firstChild.nodeValue=displayName;}
  } catch(e) {if(sequence===loadSequence)message(e.message,true);} finally {if(sequence===loadSequence){$('#loading').hidden=true;workspace.removeAttribute('aria-busy');}}
 }
+function addDividendBatchRow() {
+ const container=$('#dividend-batch-rows');
+ const choices=collections.accounts.filter(account=>investmentAccount(account)
+  && [true,'TRUE','true',1].includes(account.active)).map(account=>[account.account_id,account.name]);
+ container.insertAdjacentHTML('beforeend',`<fieldset class="dividend-batch-row" data-dividend-batch-row>
+  <label>계좌<select name="account_id" required>${selectOptions(choices,'','선택하세요')}</select></label>
+  <label>배당 구분<select name="dividend_group">${selectOptions(dividendGroups.map(group=>[group,group]),'','미지정')}</select></label>
+  <label>총배당<input name="gross_amount" type="number" min="0" max="9000000000000" step="1" required></label>
+  <button type="button" data-dividend-batch-remove aria-label="입력 줄 삭제">삭제</button>
+ </fieldset>`);
+ syncDividendBatchControls();
+ return container.lastElementChild;
+}
+function syncDividendBatchControls() {
+ const rows=$('#dividend-batch-rows').children;
+ $('#dividend-batch-add').disabled=rows.length>=50;
+ for (const row of rows) $('[data-dividend-batch-remove]',row).disabled=rows.length===1;
+}
+function openDividendBatch() {
+ editor={resource:'dividends',batch:true};
+ $('#editor').classList.add('dividend-batch-dialog');
+ $('#editor-title').textContent='배당 추가';
+ $('#editor-error').textContent='';
+ $('#editor-fields').innerHTML=`<div class="dividend-batch-fields">
+  <label>공통 지급일<input name="payment_date" type="date" value="${today()}" required></label>
+  <div id="dividend-batch-rows"></div>
+  <button type="button" id="dividend-batch-add">열 추가</button>
+ </div>`;
+ addDividendBatchRow();
+ $('#editor').showModal();
+}
+async function saveDividendBatch(form) {
+ const payment_date=$('[name="payment_date"]',form).value;
+ const items=Array.from(form.querySelectorAll('[data-dividend-batch-row]'),row=>({
+  account_id:$('[name="account_id"]',row).value,
+  dividend_group:$('[name="dividend_group"]',row).value,
+  gross_amount:Number($('[name="gross_amount"]',row).value),
+ }));
+ const result=await api('/dividends/batch','POST',{payment_date,items});
+ const year=payment_date.slice(0,4);
+ if (![...dividendYear.options].some(option=>option.value===year)) dividendYear.add(new Option(year+'년',year));
+ dividendYear.value=year;
+ filters.dividendGroup='';
+ filters.dividendSymbol='';
+ dividendAccountViews.clear();
+ $('#editor').close();
+ message(`배당 ${result.items.length}건을 저장했습니다.`);
+ await render();
+}
 async function openEditor(resource, id, flowType, parent=null) {
  const record=id?collections[resource]?.find(r=>r[idKeys[resource]]===id):null;
  for(const related of ['accounts','asset-items','liabilities']) if(schemas[resource].some(k=>({accounts:'account_id','asset-items':'asset_id',liabilities:'loan_id'}[related])===k) && !collections[related]) await getCollection(related);
  editor={resource,record};
+ $('#editor').classList.remove('dividend-batch-dialog');
  $('#editor-title').textContent=titles[resource]+(record?' 수정':' 추가');
  $('#editor-error').textContent='';
  const detailBudget=resource==='budgets' && (record?.flow_type ?? flowType)!=='income';
@@ -666,7 +716,7 @@ async function openEditor(resource, id, flowType, parent=null) {
   let options=choices?.map(c=>[c,words[c] || c]);
   const fk={account_id:'accounts',asset_id:'asset-items',loan_id:'liabilities'}[key];
   if(fk) options=(collections[fk] || []).filter(r=>!investment || key!=='account_id' || investmentAccount(r)).map(r=>[r[idKeys[fk]],r.name]);
-  const optional=['note','institution','end_month'].includes(key) || (key==='category_3' && !parent);
+  const optional=['note','institution','end_month'].includes(key) || (key==='category_3' && !parent) || (resource==='dividends' && key==='symbol');
   const required=optional?'':'required';
   let field;
   const range=resource==='budgets' && key==='amount'?'min="-9000000000000" max="9000000000000"'
@@ -699,9 +749,25 @@ async function openEditor(resource, id, flowType, parent=null) {
  $('#editor').showModal();
 }
 $('#editor-close').onclick=$('#editor-cancel').onclick=()=>$('#editor').close();
+$('#editor-fields').addEventListener('click',e=>{
+ const button=e.target.closest('button');
+ if (!button || button.disabled || $('#editor-save').disabled) return;
+ if (button.id==='dividend-batch-add') {
+  $('[name="account_id"]',addDividendBatchRow()).focus();
+ } else if ('dividendBatchRemove' in button.dataset) {
+  button.closest('[data-dividend-batch-row]').remove();
+  syncDividendBatchControls();
+  $('#dividend-batch-add').focus();
+ }
+});
 $('#editor-form').addEventListener('submit',async e=>{
  e.preventDefault();const save=$('#editor-save');save.disabled=true;$('#editor-error').textContent='';
- try {const data=Object.fromEntries(new FormData(e.target));for(const k in data){if(numeric.has(k))data[k]=Number(data[k]);if(k==='active')data[k]=data[k]==='true';}data.expected_version=editor.record?Number(editor.record.version):0;
+ try {
+  if (editor.batch) {
+   await saveDividendBatch(e.target);
+   return;
+  }
+  const data=Object.fromEntries(new FormData(e.target));for(const k in data){if(numeric.has(k))data[k]=Number(data[k]);if(k==='active')data[k]=data[k]==='true';}data.expected_version=editor.record?Number(editor.record.version):0;
   if (editor.resource==='budgets' && 'category_2' in data) {
    data.item=editor.record?.item || data.category_2;
   }
@@ -788,7 +854,8 @@ workspace.addEventListener('click',async e=>{
  }
  el.disabled=true;
  try {
-  if(el.dataset.add) await openEditor(el.dataset.add,null,el.dataset.flowType);
+  if(el.dataset.add==='dividends') openDividendBatch();
+  else if(el.dataset.add) await openEditor(el.dataset.add,null,el.dataset.flowType);
   else if(el.dataset.addBudgetChild){
    const parent=collections.budgets.find(row=>row.budget_id===el.dataset.addBudgetChild);
    if(parent) await openEditor('budgets',null,parent.flow_type,parent);

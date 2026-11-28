@@ -327,6 +327,17 @@ def validate_record(table, payload, data, existing=None):
     return validated
 
 
+def dividend_group_operation(row, key, group, stamp):
+    fields = {'key': key, 'value': group, 'value_type': 'string',
+              'description': '배당 구분', 'updated_at': stamp} if group else {}
+    return operation('settings', row, fields)
+
+
+def validate_dividend_group(group):
+    if group not in ('', *DIVIDEND_GROUPS):
+        raise AppError('배당 구분은 토스증권 또는 ISA를 선택하세요.')
+
+
 def write_record(repo, rid, table, payload, method='POST', identifier=None, expected_version=None):
     def plan(raw, data):
         existing = None
@@ -411,20 +422,59 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
             previous = next((entry['value'] for entry in data['settings'] if entry['key'] == key), '')
             if 'dividend_group' not in payload:
                 dividend_group = previous
-            if dividend_group not in ('', *DIVIDEND_GROUPS):
-                raise AppError('배당 구분은 토스증권 또는 ISA를 선택하세요.')
+            validate_dividend_group(dividend_group)
             if dividend_group != previous:
                 settings_row = next(
                     (i for i, entry in enumerate(raw['settings'][1:], 2) if entry and entry[0] == key),
                     len(raw['settings']) + 1 + sum(op['tab'] == 'settings' and op['row'] > len(raw['settings'])
                                                    for op in operations),
                 )
-                fields = {'key': key, 'value': dividend_group, 'value_type': 'string',
-                          'description': '배당 구분', 'updated_at': stamp} if dividend_group else {}
-                operations.append(operation('settings', settings_row, fields))
+                operations.append(dividend_group_operation(settings_row, key, dividend_group, stamp))
             record['dividend_group'] = dividend_group
         return [operations], record
     return repo.mutate(rid, [table, method, identifier, payload, expected_version], plan)
+
+
+def create_dividend_batch(repo, rid, payment_date, rows):
+    payment_date = date_value(payment_date)
+    if not isinstance(rows, list) or not 1 <= len(rows) <= 50:
+        raise AppError('배당은 한 번에 1~50건을 입력할 수 있습니다.')
+
+    def plan(raw, data):
+        assert_open(data, 'dividends', {'payment_date': payment_date})
+        accounts = {account['account_id']: account for account in data['accounts']}
+        dividends_row = len(raw['dividends']) + 1
+        settings_row = len(raw['settings']) + 1
+        stamp = now()
+        operations, items = [], []
+        for index, row in enumerate(rows, 1):
+            try:
+                if not isinstance(row, dict) or set(row) - {'account_id', 'gross_amount', 'dividend_group'}:
+                    raise AppError('지원하지 않는 입력입니다.')
+                account_id = row.get('account_id')
+                account = accounts.get(account_id) if isinstance(account_id, str) else None
+                if not account:
+                    raise AppError('계좌를 선택하세요.')
+                group = row.get('dividend_group', '')
+                validate_dividend_group(group)
+                amount = row.get('gross_amount')
+                dividend = validate_record('dividends', {
+                    'payment_date': payment_date, 'account_id': account_id, 'gross_amount': amount,
+                    'tax_amount': 0, 'net_amount': amount, 'currency': account['currency'],
+                }, data)
+            except AppError as exc:
+                raise AppError(f'{index}번째 배당 항목: {exc}', exc.status, exc.code) from exc
+            identifier = str(uuid4())
+            dividend.update(dividend_id=identifier, created_at=stamp, updated_at=stamp, version=1)
+            operations.append(operation('dividends', dividends_row, dividend))
+            dividends_row += 1
+            if group:
+                operations.append(dividend_group_operation(settings_row, DIVIDEND_GROUP_PREFIX + identifier, group, stamp))
+                settings_row += 1
+            items.append({**dividend, 'dividend_group': group, 'investment_category': ''})
+        return [operations], {'items': items}
+
+    return repo.mutate(rid, ['dividends', 'batch', payment_date, rows], plan)
 
 
 def copy_budget(repo, rid, target, source, expected_version):

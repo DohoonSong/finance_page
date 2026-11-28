@@ -11,7 +11,7 @@ from .actuals import download_latest, monthly_actuals, publish
 from .auth import login_required
 from .deployment import deployment_config
 from .schema import AppError
-from .services import (CATEGORY_TABLES, DIVIDEND_GROUPS, TOSS_CATEGORIES, asset_balance_groups, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, lease_budget, month_end, month_value, now, portfolio_summary, reopen, visible_settings, write_record)
+from .services import (CATEGORY_TABLES, DIVIDEND_GROUPS, TOSS_CATEGORIES, asset_balance_groups, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, create_dividend_batch, date_value, dividend_summary, effective_closings, finalize, investment_rows, lease_budget, month_end, month_value, now, portfolio_summary, reopen, visible_settings, write_record)
 from .store import GoogleSheets, operation
 
 bp = Blueprint('api', __name__, url_prefix='/api/v1')
@@ -81,6 +81,12 @@ def records(resource, identifier=None):
     value = body()
     version = value.pop('expected_version', None)
     return ok(write_record(repository(), g.request_id, table, value, request.method, identifier, version), 201 if request.method == 'POST' else 200)
+
+
+@bp.post('/dividends/batch')
+def dividend_batch():
+    value = body(('payment_date', 'items'))
+    return ok(create_dividend_batch(repository(), g.request_id, value.get('payment_date'), value.get('items')), 201)
 
 
 @bp.get('/dashboard')

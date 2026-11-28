@@ -110,7 +110,7 @@ class Holding(Record):
 class Dividend(Record):
     payment_date: date
     account_id: UUID
-    symbol: Text
+    symbol: str = Field(default='', max_length=200)
     gross_amount: Money
     tax_amount: Money
     net_amount: Money

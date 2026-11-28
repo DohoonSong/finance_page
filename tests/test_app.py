@@ -395,3 +395,29 @@ def test_dividend_years_and_monthly_account_totals(send, client):
     assert (old['month'], old['gross_amount'], old['toss_gross_amount'], old['isa_gross_amount']) == (
         '2025-11', 50, 50, 0,
     )
+
+
+def test_dividend_batch_is_atomic_and_idempotent(send, client):
+    krw = account(send, kind='brokerage')
+    usd = account(send, currency='USD', kind='brokerage')
+    payload = {'payment_date': '2026-11-03', 'items': [
+        {'account_id': krw['account_id'], 'dividend_group': 'ISA', 'gross_amount': 1200},
+        {'account_id': usd['account_id'], 'dividend_group': '토스증권', 'gross_amount': 24},
+    ]}
+    invalid_items = [payload['items'][0], {**payload['items'][1], 'gross_amount': -1}]
+    failure = send('/dividends/batch', {**payload, 'items': invalid_items})
+    assert failure.status_code == 422
+    assert '2번째' in failure.json['error']['message']
+    assert client.get('/api/v1/dividends?year=2026').json['data'] == []
+
+    rid = str(uuid4())
+    response = send('/dividends/batch', payload, rid=rid)
+    assert response.status_code == 201
+    assert send('/dividends/batch', payload, rid=rid).json == response.json
+    records = client.get('/api/v1/dividends?year=2026').json['data']
+    assert [(r['currency'], r['dividend_group'], r['gross_amount'], r['net_amount']) for r in records] == [
+        ('KRW', 'ISA', 1200, 1200), ('USD', '토스증권', 24, 24),
+    ]
+    assert all(r['symbol'] == '' and r['tax_amount'] == 0 for r in records)
+    updated = send('/dividends/' + records[0]['dividend_id'], {'expected_version': 1, 'note': '확인'}, 'PATCH')
+    assert updated.status_code == 200

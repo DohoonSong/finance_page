@@ -184,3 +184,21 @@
 }
 .spend-legend li > strong, .spend-legend li > .caption { grid-column: 2; }
 .spend-swatch { width: .65rem; height: .65rem; border-radius: 2px; }
+
+.dividend-batch-dialog { width: min(720px, 94vw); }
+.dividend-batch-fields { grid-column: 1 / -1; }
+.dividend-batch-fields > label { max-width: 13rem; margin-bottom: .85rem; }
+.dividend-batch-row {
+ display: grid;
+ grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr) minmax(0, 1fr) auto;
+ gap: .55rem;
+ align-items: end;
+ border: 1px solid var(--line);
+ border-radius: 8px;
+ min-width: 0;
+ margin: 0 0 .65rem;
+ padding: .65rem;
+}
+@media (max-width: 570px) {
+ .dividend-batch-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

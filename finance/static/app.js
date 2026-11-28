@@ -24,10 +24,10 @@ function shiftRate(value, places) {
  return Number(digits+'e'+(Number(exponent)+places));
 }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const labels = {kind:'구분',name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',subcategory:'하위 분류',payment_method:'결제 수단',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',lease_loan:'전세대출',lease_repayment:'전세 상환금',lease_total:'계산 잔액',dividend_group:'배당 구분',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',toss_gross_amount:'토스증권',isa_gross_amount:'ISA',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
+const labels = {kind:'구분',name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',budget_amount:'예산',actual_amount:'실제 소비',budget_remaining:'남은 예산',budget_ratio:'소진율',transaction_count:'건수',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',subcategory:'하위 분류',payment_method:'결제 수단',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',lease_loan:'전세대출',lease_repayment:'전세 상환금',lease_total:'계산 잔액',dividend_group:'배당 구분',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',toss_gross_amount:'토스증권',isa_gross_amount:'ISA',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
 const words = {income:'수입',expense:'소비',investment:'투자 배분',transfer:'계좌 이체',debt_principal:'원금 상환',bank:'은행',cash:'현금',brokerage:'증권',retirement:'퇴직연금',other:'기타',deposit:'예금',property:'부동산',open:'진행 중',preparing:'마감 중',closed:'마감',true:'사용',false:'미사용'};
 const numeric = new Set(['amount','day','original_principal','annual_rate','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit']);
-const moneyKeys = new Set(['amount','original_principal','balance','cost_basis','market_value','gross_amount','toss_gross_amount','isa_gross_amount','tax_amount','net_amount','profit','net_worth','assets_total','liabilities_total','unrealized_profit','dividend_total','realized_profit','total_profit','budget_balance','portfolio_profit']);
+const moneyKeys = new Set(['amount','budget_amount','actual_amount','budget_remaining','original_principal','balance','cost_basis','market_value','gross_amount','toss_gross_amount','isa_gross_amount','tax_amount','net_amount','profit','net_worth','assets_total','liabilities_total','unrealized_profit','dividend_total','realized_profit','total_profit','budget_balance','portfolio_profit']);
 const schemas = {
  'accounts':['name','type','institution','currency','active'],
  'asset-items':['account_id','category','name','active'],
@@ -84,7 +84,7 @@ const empty = (text='아직 기록이 없습니다. 첫 항목을 추가해 시�
 function panel(title, content, actions='', description='') { return `<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${description?`<p class="caption">${esc(description)}</p>`:''}</div><div class="actions">${actions}</div></div>${content}</section>`; }
 function card(title, value, hint, highlight=false) { return `<article class="card ${highlight?'highlight':''}"><p class="card-label">${esc(title)}</p><div class="metric">${esc(value)}</div><span class="caption">${esc(hint)}</span></article>`; }
 function display(row,key) {
- if (key==='income_share') return percentage(row[key]);
+ if (key==='income_share' || key==='budget_ratio') return percentage(row[key]);
  if (key==='annual_rate') return row[key] == null || row[key]==='' ? '—' : annualRateFormat.format(row[key]);
  if (['lease_loan','lease_repayment','lease_total'].includes(key)) return row[key]==null?'—':money(row[key]);
  if (key==='amount' && row[key]===null) return '—';
@@ -349,15 +349,65 @@ function actualDetails(actuals) {
   }).join('');
  return `<div class="record-filters">${category}${subcategory}</div>${tables}`;
 }
-function actualPage({actuals, error}) {
- if (error) return panel('실제 수입·지출',`<p class="error">${esc(percentOnly()?'실제 수입·지출을 불러오지 못했습니다.':error)}</p>`);
+// Reviewed pairs use both source levels; unlisted pairs await confirmation.
+const spendingMappings=[
+ ['식비',['식사/간식','커피/음료','식재료','배달음식'],['생활/소비','식비']],
+ ['쇼핑비',['의류/잡화','전자제품'],['생활/소비','취미/쇼핑']],
+ ['기타/고정비',['통신비'],['고정비','통신비']],
+ ['기타/고정비',['보험료'],['고정비','보험']],
+ ['기타/고정비',['교통비'],['고정비','교통비']],
+ ['기타/고정비',['월세/관리비'],['주거비','주거비']],
+];
+const spendingPath=(category,subcategory)=>JSON.stringify([category?.trim() || '',subcategory?.trim() || '']);
+const spendingTargets=new Map(spendingMappings.flatMap(([category,subcategories,target])=>
+ subcategories.map(subcategory=>[spendingPath(category,subcategory),spendingPath(...target)])));
+function compareSpending(budgetRows,actualRows) {
+ const budgets=new Map(), pending=new Map();
+ for (const row of budgetRows) {
+  if (row.flow_type!=='expense') continue;
+  const category=row.category, subcategory=budgetSecond(row);
+  const key=spendingPath(category,subcategory);
+  if (!budgets.has(key)) budgets.set(key,{category,subcategory,budget_amount:0,actual_amount:0,matched:false});
+  budgets.get(key).budget_amount+=Number(row.amount);
+ }
+ for (const row of actualRows) {
+  if (row.flow_type!=='expense') continue;
+  const key=spendingPath(row.category,row.subcategory);
+  const target=budgets.get(spendingTargets.get(key));
+  if (target) {
+   target.actual_amount+=Number(row.amount);
+   target.matched=true;
+  } else {
+   if (!pending.has(key)) pending.set(key,{category:row.category || '미분류',subcategory:row.subcategory || '미분류',transaction_count:0});
+   pending.get(key).transaction_count++;
+  }
+ }
+ const comparisons=[...budgets.values()].filter(row=>row.matched).map(row=>({...row,
+  budget_remaining:row.budget_amount-row.actual_amount,
+  budget_ratio:incomeShare(row.actual_amount,row.budget_amount),
+ }));
+ return {comparisons,pending:[...pending.values()]};
+}
+function spendingComparison(budgetRows,actualRows) {
+ const {comparisons,pending}=compareSpending(budgetRows,actualRows);
+ const fields=percentOnly()?['category','subcategory','budget_ratio']
+  :['category','subcategory','budget_amount','actual_amount','budget_remaining','budget_ratio'];
+ const matched=comparisons.length?table(comparisons,fields):'<p class="caption">비교할 수 있는 소비 분류가 없습니다.</p>';
+ const review=pending.length?`<details class="spending-review"><summary>매칭 보류 · ${pending.length}개 분류</summary>
+  ${table(pending,['category','subcategory','transaction_count'])}</details>`:'';
+ return panel('예산 대비 지출',matched+review,'','선택한 달의 소비 예산과 분류가 확인된 실제 소비를 비교합니다.');
+}
+function actualPage({actuals, error, budgetRows, budgetError}) {
+ if (error) return panel('예산 대비 지출',`<p class="error">${esc(percentOnly()?'실제 수입·지출을 불러오지 못했습니다.':error)}</p>`);
  if (!actuals?.filename) {
   const help=actualsEnabled?'설정에서 최신 ClevMoney 백업을 가져오면 거래가 표시됩니다.':'서버에서 ClevMoney 백업 연동을 설정하면 사용할 수 있습니다.';
-  return panel('실제 수입·지출',`<p class="section-note">${help}</p>`,'<a href="/settings">설정으로 이동</a>');
+  return panel('예산 대비 지출',`<p class="section-note">${help}</p>`,'<a href="/settings">설정으로 이동</a>');
  }
  const income=actuals.totals.income;
  const totals=`실제 수입 ${budgetValue(income,income)} · 실제 소비 ${budgetValue(actuals.totals.expense,income)}`;
- return panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals)}</div>`,'',
+ const comparison=budgetError?panel('예산 대비 지출','<p class="error">예산을 불러오지 못했습니다.</p>')
+  :spendingComparison(budgetRows,actuals.items);
+ return comparison+panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals)}</div>`,'',
   totals+(percentOnly()?'':' · 백업 '+actuals.filename));
 }
 function budgetPage({rows, recurring, summary}) {
@@ -407,10 +457,12 @@ async function render(focusFilter=null) {
    if (sequence!==loadSequence) return;
    budgetView={rows,recurring,summary};
   } else if(page==='actuals') {
-   const result=actualsEnabled?await api('/actual-transactions?month='+month)
-    .then(actuals=>({actuals}),err=>({error:err.message})):{};
+   const [result,budget]=actualsEnabled?await Promise.all([
+    api('/actual-transactions?month='+month).then(actuals=>({actuals}),err=>({error:err.message})),
+    api('/budgets?month='+month).then(budgetRows=>({budgetRows}),()=>({budgetError:true})),
+   ]):[{},{}];
    if (sequence!==loadSequence) return;
-   actualView=result;
+   actualView={...result,...budget};
   } else if(page==='assets') {
    const [accounts, items, loans, snaps, summary]=await Promise.all([getCollection('accounts'),getCollection('asset-items'),getCollection('liabilities'),getCollection('asset-snapshots'),api('/assets?date='+month+'-'+new Date(Number(year),Number(month.slice(5)),0).getDate())]);
    const k=summary.by_currency.KRW;

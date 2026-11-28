@@ -126,24 +126,33 @@ function selectOptions(choices, selected, placeholder) {
 function filterSelect(key, label, choices, placeholder) {
  return `<label>${label}<select data-filter="${key}" aria-label="${esc(label)}">${selectOptions(choices,filters[key],placeholder)}</select></label>`;
 }
+function holdingFilterButtons(key, label, options, allLabel) {
+ const choices=[['',allLabel],...options];
+ return `<div class="budget-filters" role="group" aria-label="${label}">
+  <span class="budget-filter-label">${label}</span>
+  ${choices.map(([value,name])=>`<button type="button" data-holding-filter="${key}" value="${esc(value)}"
+   aria-pressed="${filters[key]===value}">${esc(name)}</button>`).join('')}
+ </div>`;
+}
 function investmentFilters(accounts, holdings=[]) {
  const eligible=accounts.filter(investmentAccount);
  if (!eligible.some(account=>account.account_id===filters.account)) filters.account='';
  const toss=tossAccount(eligible.find(account=>account.account_id===filters.account));
- const account=filterSelect('account','계좌',eligible.map(a=>[a.account_id,a.name]),'전체 계좌');
+ const choices=eligible.map(a=>[a.account_id,a.name]);
  if (page==='dividends') {
   if (!toss) filters.category='';
-  return account+(toss?filterSelect('category','투자 분류',tossCategories.map(c=>[c,c]),'전체 분류'):'');
+  return filterSelect('account','계좌',choices,'전체 계좌')+(toss?filterSelect('category','투자 분류',tossCategories.map(c=>[c,c]),'전체 분류'):'');
  }
  const owned=holdings.filter(row=>row.account_id===filters.account);
  const groups=toss?tossCategories:uniqueOptions(owned,'portfolio_group');
  if (!groups.includes(filters.category)) filters.category='';
  const names=uniqueOptions(owned.filter(row=>!filters.category || row.portfolio_group===filters.category),'name');
  if (!names.includes(filters.holdingName)) filters.holdingName='';
- return account+(filters.account
-  ?filterSelect('category','포트폴리오 묶음',groups.map(value=>[value,value]),'전체 묶음')
-   +filterSelect('holdingName','실제 종목명',names.map(value=>[value,value]),'전체 종목')
-  :'');
+ const account=holdingFilterButtons('account','1차 계좌',choices,'전체 계좌');
+ if (!filters.account) return account;
+ const portfolio=holdingFilterButtons('category','2차 포트폴리오 묶음',groups.map(value=>[value,value]),'전체 묶음');
+ const symbol=`<div class="record-filters">${filterSelect('holdingName','실제 종목명',names.map(value=>[value,value]),'전체 종목')}</div>`;
+ return account+portfolio+symbol;
 }
 function uniqueOptions(rows, field) {
  return [...new Set(rows.map(row=>row[field]).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'ko'));
@@ -395,13 +404,13 @@ async function render(focusFilter=null) {
   } else if(page==='investments') {
    const [accounts, holdings, gains]=await Promise.all([getCollection('accounts'),getCollection('holdings'),getCollection('realized-gains')]);
    if (sequence!==loadSequence) return;
-   html=`<div class="record-filters">${investmentFilters(accounts,holdings)}</div>`;
+   const holdingFilters=investmentFilters(accounts,holdings);
    const visible=holdings.filter(row=>(!filters.account || row.account_id===filters.account)
     && (!filters.category || row.portfolio_group===filters.category)
     && (!filters.holdingName || row.name===filters.holdingName));
    const summary=await api('/portfolio-summary?'+investmentQuery());
    html+=panel('계좌별 수익',table(summary,['name','currency','cost_basis','market_value','unrealized_profit','dividend_total','realized_profit','total_profit','simple_return_pct']),'','계좌·종목별 최신 평가액. 순배당과 실현 손익은 누적 값이며 단순 수익률은 시간가중 수익률이 아닙니다.');
-   html+=panel('보유종목 스냅샷',table(visible.map(row=>({...row,holding_name:row.name})),['date','account_id','portfolio_group','holding_name','symbol','cost_basis','market_value','currency'],'holdings'),button('holdings'),'청산 시 보유 원가와 평가액을 0으로 기록하세요. 계좌 현금은 CASH 종목으로 관리합니다.');
+   html+=panel('보유종목 스냅샷',holdingFilters+table(visible.map(row=>({...row,holding_name:row.name})),['date','account_id','portfolio_group','holding_name','symbol','cost_basis','market_value','currency'],'holdings'),button('holdings'),'청산 시 보유 원가와 평가액을 0으로 기록하세요. 계좌 현금은 CASH 종목으로 관리합니다.');
    html+=panel('실현 손익',table(filteredInvestments(gains),['trade_date','account_id','symbol','investment_category','profit','currency'],'realized-gains'),button('realized-gains'));
   } else if(page==='dividends') {
    const [accounts, rows]=await Promise.all([getCollection('accounts'),getCollection('dividends','?year='+year)]);
@@ -445,7 +454,11 @@ async function render(focusFilter=null) {
   }
   const preferences=page==='settings'?settings:await api('/settings');
   const displayName=preferences.items.find(r=>r.key==='display_name')?.value || '나의 재무';
-  if(sequence===loadSequence) {workspace.innerHTML=page==='budgets'?budgetPage(budgetView):page==='actuals'?actualPage(actualView):html;if(focusFilter) $('[data-filter='+focusFilter+']',workspace)?.focus();$('.brand > span:last-child').firstChild.nodeValue=displayName;}
+  if(sequence===loadSequence) {workspace.innerHTML=page==='budgets'?budgetPage(budgetView):page==='actuals'?actualPage(actualView):html;if(focusFilter) {
+   const target=$(`[data-holding-filter="${focusFilter}"][aria-pressed="true"]`,workspace)
+    || $(`[data-filter="${focusFilter}"]`,workspace);
+   target?.focus({preventScroll:true});
+  }$('.brand > span:last-child').firstChild.nodeValue=displayName;}
  } catch(e) {if(sequence===loadSequence)message(e.message,true);} finally {if(sequence===loadSequence){$('#loading').hidden=true;workspace.removeAttribute('aria-busy');}}
 }
 async function openEditor(resource, id, flowType, parent=null) {
@@ -529,8 +542,22 @@ $('#editor-form').addEventListener('submit',async e=>{
   $('#editor').close();message('저장했습니다.');await render();
  }catch(err){$('#editor-error').textContent=err.message;}finally{save.disabled=false;}
 });
+function changeFilter(key,value) {
+ filters[key]=value;
+ if (key==='account') filters.category='';
+ if (key==='account' || key==='category' || key==='dividendGroup') {
+  filters.holdingName='';
+  filters.dividendSymbol='';
+  filters.dividendMonth='';
+ }
+ render(key);
+}
 workspace.addEventListener('click',async e=>{
  const el=e.target.closest('button');if(!el || el.disabled)return;
+ if (el.dataset.holdingFilter) {
+  if (!workspace.hasAttribute('aria-busy')) changeFilter(el.dataset.holdingFilter,el.value);
+  return;
+ }
  if ('budgetToggle' in el.dataset) {
   const expanded=el.getAttribute('aria-expanded')==='true';
   el.setAttribute('aria-expanded',String(!expanded));
@@ -612,15 +639,7 @@ workspace.addEventListener('change',e=>{
   return;
  }
  const key=e.target.dataset.filter;
- if (!key) return;
- filters[key]=e.target.value;
- if (key==='account') filters.category='';
- if (key==='account' || key==='category' || key==='dividendGroup') {
-  filters.holdingName='';
-  filters.dividendSymbol='';
-  filters.dividendMonth='';
- }
- render(key);
+ if (key) changeFilter(key,e.target.value);
 });
 monthInput.addEventListener('change',()=>render());
 render();

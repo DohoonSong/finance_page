@@ -5,6 +5,7 @@ from uuid import UUID
 from pydantic import BaseModel, ConfigDict, Field, StrictBool, StrictInt, field_validator, model_validator
 
 Money = Annotated[StrictInt, Field(ge=0, le=9_000_000_000_000)]
+SignedMoney = Annotated[StrictInt, Field(ge=-9_000_000_000_000, le=9_000_000_000_000)]
 Text = Annotated[str, Field(min_length=1, max_length=200)]
 Currency = Literal['KRW', 'USD']
 Flow = Literal['income', 'expense', 'investment', 'transfer', 'debt_principal']
@@ -46,7 +47,7 @@ class Budget(Record):
     month: Month
     category: Text
     item: Text
-    amount: Money
+    amount: SignedMoney
     flow_type: Flow
     note: str = Field(default='', max_length=1000)
 
@@ -109,7 +110,7 @@ class Holding(Record):
 class Dividend(Record):
     payment_date: date
     account_id: UUID
-    symbol: Text
+    symbol: str = Field(default='', max_length=200)
     gross_amount: Money
     tax_amount: Money
     net_amount: Money
@@ -127,7 +128,7 @@ class Gain(Record):
     trade_date: date
     account_id: UUID
     symbol: Text
-    profit: Annotated[StrictInt, Field(ge=-9_000_000_000_000, le=9_000_000_000_000)]
+    profit: SignedMoney
     currency: Currency
     note: str = Field(default='', max_length=1000)
 

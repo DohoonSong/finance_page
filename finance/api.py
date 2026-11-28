@@ -3,11 +3,16 @@ import json
 import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
+from google.auth.exceptions import GoogleAuthError
+from gspread.exceptions import APIError, SpreadsheetNotFound
+from requests import RequestException
 from flask import Blueprint, current_app, g, jsonify, request
+from .actuals import download_latest, monthly_actuals, publish
 from .auth import login_required
+from .deployment import deployment_config
 from .schema import AppError
-from .services import (assets_summary, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, month_end, month_value, now, portfolio_summary, reopen, write_record)
-from .store import operation
+from .services import (CATEGORY_TABLES, DIVIDEND_GROUPS, TOSS_CATEGORIES, asset_balance_groups, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, create_dividend_batch, date_value, dividend_summary, effective_closings, finalize, investment_rows, lease_budget, month_end, month_value, now, portfolio_summary, reopen, update_amount_batch, visible_settings, write_record)
+from .store import GoogleSheets, operation
 
 bp = Blueprint('api', __name__, url_prefix='/api/v1')
 RESOURCES = {'accounts': 'accounts', 'asset-items': 'asset_items', 'budgets': 'budget_items', 'recurring-items': 'recurring_items', 'asset-snapshots': 'asset_snapshots', 'liabilities': 'liabilities', 'liability-snapshots': 'liability_snapshots', 'holdings': 'holdings', 'dividends': 'dividends', 'realized-gains': 'realized_gains'}
@@ -60,21 +65,40 @@ def records(resource, identifier=None):
     if not table:
         raise AppError('경로를 찾을 수 없습니다.', 404)
     if request.method == 'GET':
-        rows = repository().read()[table]
+        data = repository().read()
+        rows = investment_rows(data, table) if table in CATEGORY_TABLES else data[table]
         if resource == 'budgets':
-            month = selected_month()
-            rows = [r for r in rows if r['month'] == month]
+            rows = budget_rows(data, selected_month())
         if resource == 'holdings' and request.args.get('account_id'):
             rows = [r for r in rows if r['account_id'] == request.args['account_id']]
         if resource == 'dividends':
             year = selected_year()
-            rows = [r for r in rows if r['payment_date'].startswith(year)]
+            rows = sorted((r for r in rows if r['payment_date'][:4] == year),
+                          key=lambda row: row['payment_date'], reverse=True)
         return ok(rows)
     if request.method == 'DELETE' and resource != 'budgets':
         raise AppError('이 항목은 삭제할 수 없습니다.', 405)
     value = body()
     version = value.pop('expected_version', None)
     return ok(write_record(repository(), g.request_id, table, value, request.method, identifier, version), 201 if request.method == 'POST' else 200)
+
+
+@bp.patch('/holdings/batch')
+def holding_batch():
+    value = body(('items',))
+    return ok(update_amount_batch(repository(), g.request_id, 'holdings', value.get('items')))
+
+
+@bp.patch('/dividends/batch')
+def dividend_amount_batch():
+    value = body(('items',))
+    return ok(update_amount_batch(repository(), g.request_id, 'dividends', value.get('items')))
+
+
+@bp.post('/dividends/batch')
+def dividend_batch():
+    value = body(('payment_date', 'items'))
+    return ok(create_dividend_batch(repository(), g.request_id, value.get('payment_date'), value.get('items')), 201)
 
 
 @bp.get('/dashboard')
@@ -86,7 +110,7 @@ def dashboard():
 
 @bp.get('/budget-summary')
 def budgets():
-    return ok(budget_summary(repository().read(), selected_month()))
+    return ok(budget_summary(repository().read(), selected_month(), request.args.get('category')))
 
 
 @bp.post('/budgets/<month>/copy')
@@ -98,17 +122,42 @@ def copy(month):
 @bp.get('/assets')
 def assets():
     cutoff = date_value(request.args.get('date', datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()))
-    return ok(assets_summary(repository().read(), cutoff))
+    data = repository().read()
+    return ok({**assets_summary(data, cutoff), 'lease_budget': lease_budget(data, cutoff[:7]),
+               'balance_groups': asset_balance_groups(data, cutoff)})
+
+
+def investment_filters(*, allow_portfolio_groups=False):
+    account_id = request.args.get('account_id')
+    category = request.args.get('investment_category')
+    if category and (not account_id or len(category) > 200 or (not allow_portfolio_groups and category not in TOSS_CATEGORIES)):
+        raise AppError('계좌와 유효한 투자 분류를 선택하세요.', 400)
+    return {'account_id': account_id, 'category': category}
 
 
 @bp.get('/portfolio-summary')
 def portfolio():
-    return ok(portfolio_summary(repository().read()))
+    return ok(portfolio_summary(repository().read(), **investment_filters(allow_portfolio_groups=True)))
+
+
+@bp.get('/dividend-years')
+def dividend_years():
+    rows = repository().read()['dividends']
+    years = {row['payment_date'][:4] for row in rows}
+    return ok(sorted((year for year in years if re.fullmatch(r'[1-9]\d{3}', year)), reverse=True))
 
 
 @bp.get('/dividend-summary')
 def dividends():
-    return ok(dividend_summary(repository().read(), selected_year()))
+    year = selected_year()
+    month = request.args.get('month')
+    if month and month_value(month)[:4] != year:
+        raise AppError('지급 월이 조회 연도와 일치하지 않습니다.', 400)
+    group = request.args.get('dividend_group')
+    if group and group not in DIVIDEND_GROUPS:
+        raise AppError('배당 구분을 확인하세요.', 400)
+    return ok(dividend_summary(repository().read(), year, month=month, dividend_group=group,
+                               symbol=request.args.get('symbol'), **investment_filters()))
 
 
 @bp.get('/closings')
@@ -151,19 +200,44 @@ def settings_version(rows):
 @bp.route('/settings', methods=['GET', 'PATCH'])
 def settings():
     if request.method == 'GET':
-        rows = repository().read()['settings']
-        return ok({'items': rows, 'version': settings_version(rows), 'writes_enabled': current_app.config['WRITES_ENABLED'], 'backend': current_app.config['DATA_BACKEND'], 'timezone': 'Asia/Seoul', 'base_currency': 'KRW'})
+        rows = visible_settings(repository().read())
+        deployment = deployment_config()
+        return ok({'items': rows, 'version': settings_version(rows), 'writes_enabled': current_app.config['WRITES_ENABLED'], 'backend': current_app.config['DATA_BACKEND'], 'timezone': 'Asia/Seoul', 'base_currency': 'KRW', 'update_branch': deployment['branch'], 'update_missing': deployment['missing'], 'running_commit': current_app.extensions['deployment_runtime']['commit']})
     value = body(('expected_version', 'display_name'))
     name = value.get('display_name')
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:
         raise AppError('표시 이름은 1~100자입니다.')
     def plan(raw, data):
-        if value.get('expected_version') != settings_version(data['settings']):
+        if value.get('expected_version') != settings_version(visible_settings(data)):
             raise AppError('설정이 변경되었습니다. 새로고침하세요.', 409)
         row = next((i for i, r in enumerate(raw['settings'][1:], 2) if r and r[0] == 'display_name'), len(raw['settings']) + 1)
         record = dict(key='display_name', value=name.strip(), value_type='string', description='웹앱 표시 이름', updated_at=now())
         return [[operation('settings', row, record)]], record
     return ok(repository().mutate(g.request_id, ['settings', value], plan))
+
+
+@bp.route('/actual-transactions', methods=['GET', 'POST'])
+def actual_transactions():
+    repo = repository()
+    folder = current_app.config['CLEV_BACKUP_FOLDER_ID']
+    if not isinstance(repo.backend, GoogleSheets) or not re.fullmatch(r'[A-Za-z0-9_-]+', folder):
+        raise AppError('ClevMoney 백업 연동이 설정되지 않았습니다.', 403, 'actuals_disabled')
+    if request.method == 'POST':
+        if body(('confirm',)).get('confirm') is not True:
+            raise AppError('최신 백업 가져오기를 확인해 주세요.', 400, 'import_unconfirmed')
+        item, rows = download_latest(repo.backend.credentials, folder)
+    try:
+        with repo.locked():
+            book = repo.backend.book
+            if request.method == 'POST':
+                return ok(publish(book, item, rows))
+            return ok(monthly_actuals(book, selected_month()))
+    except (APIError, GoogleAuthError, OSError, RequestException, SpreadsheetNotFound) as exc:
+        error = exc if isinstance(exc, APIError) else exc.__cause__
+        status = error.response.status_code if isinstance(error, APIError) else None
+        if status == 403:
+            raise AppError('실제 거래 탭에 접근할 수 없습니다. 서비스 계정의 시트 권한을 확인하세요.', 503, 'actuals_permission') from None
+        raise AppError('실제 거래 시트에 연결할 수 없습니다. 잠시 후 다시 확인하세요.', 503, 'actuals_unavailable') from None
 
 
 @bp.get('/backup')

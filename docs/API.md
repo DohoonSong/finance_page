@@ -23,7 +23,7 @@
 | `/accounts`, `/accounts/{id}` | GET, POST / PATCH | 계좌 |
 | `/asset-items`, `/asset-items/{id}` | GET, POST / PATCH | 일반 자산 기준정보 |
 | `/budgets?month=YYYY-MM`, `/budgets/{id}` | GET, POST / PATCH, DELETE | 월별 예산 |
-| `/budget-summary?month=YYYY-MM` | GET | 5가지 흐름별 합계 |
+| `/budget-summary?month=YYYY-MM` | GET | 5가지 흐름별 합계. 선택 파라미터 `category`로 예산 분류 필터 |
 | `/budgets/{month}/copy` | POST | `source_month`, `expected_version: 0`. 비어 있는 월만 가능 |
 | `/recurring-items`, `/recurring-items/{id}` | GET, POST / PATCH | 반복 템플릿 |
 | `/assets?date=YYYY-MM-DD` | GET | 통화별 자산·부채·순자산과 근거 |
@@ -31,9 +31,12 @@
 | `/liabilities`, `/liabilities/{id}` | GET, POST / PATCH | KRW 대출 |
 | `/liability-snapshots`, `/liability-snapshots/{id}` | GET, POST / PATCH | 대출 잔액 |
 | `/holdings?account_id=...`, `/holdings/{id}` | GET, POST / PATCH | 보유종목 스냅샷 |
-| `/portfolio-summary` | GET | 계좌별 최신 보유종목과 누적 투자 손익 |
+| `/portfolio-summary` | GET | 계좌별 최신 보유종목과 누적 투자 손익. 선택 파라미터 `account_id`, `investment_category` |
 | `/dividends?year=YYYY`, `/dividends/{id}` | GET, POST / PATCH | 배당 원장 |
-| `/dividend-summary?year=YYYY` | GET | 월·통화별 총배당/세금/순배당 |
+| `/holdings/batch` | PATCH | 여러 보유종목 스냅샷의 취득 원가와 평가액을 일괄 수정 |
+| `/dividends/batch` | PATCH | 토스증권 또는 ISA 한 계좌의 배당 금액을 일괄 수정 |
+| `/dividends/batch` | POST | 공통 `payment_date`와 `items` 1~50건을 한 번에 등록 |
+| `/dividend-summary?year=YYYY` | GET | 월·통화별 총배당/세금/순배당. 선택 파라미터 `account_id`, `investment_category` |
 | `/realized-gains`, `/realized-gains/{id}` | GET, POST / PATCH | 실현 손익 |
 | `/closings`, `/closings/{month}` | GET | 전체 리비전 / 특정 월 상세 |
 | `/closings/{month}/preview` | POST | `{}` 또는 `expected_version` 필드. 계산만 수행 |
@@ -46,3 +49,21 @@
 상태: 400 잘못된 형식/CSRF, 401 미인증, 403 읽기 전용, 404 없음, 405 허용되지 않은 메서드, 409 충돌/마감/중복, 422 업무 검증 실패, 429 로그인 속도 제한, 503 Sheets/스키마/복구 오류.
 
 상세 필드와 순서는 인계 문서 및 `finance/models.py`를 참고합니다. 계좌 유형은 `bank/cash/brokerage/retirement/other`, 일반 자산 분류는 `cash/deposit/property/other`, 흐름은 `income/expense/investment/transfer/debt_principal`입니다. 스냅샷 중복 키는 자산·날짜, 대출·날짜, 계좌·종목·날짜입니다.
+
+
+보유종목, 배당, 실현 손익 응답에는 `investment_category`가 포함됩니다. 입력·수정 시 토스 계좌에만 아래 값을 지정할 수 있습니다.
+
+`기타주식`, `미국배당주`, `워렌버핏`, `주간배당`, `테크빅`, `ETF`, `켄피셔`
+
+빈 문자열은 미분류입니다. PATCH에서 필드를 생략하면 토스 계좌의 기존 분류가 유지됩니다. 요약 API에서 이 분류로 필터링할 때는 `account_id`도 함께 전달합니다. 분류 값은 기존 `settings` 탭에 기록 ID별로 저장되며 JSON 백업에 포함됩니다.
+
+
+월별 예산은 기존 `category`를 1차 분류로 사용합니다. POST와 PATCH에는 선택 텍스트 필드 `category_2`, `category_3`을 전달할 수 있습니다. 3차 분류에는 2차 분류가 필요합니다. 월 복사는 하위 분류도 복사합니다.
+
+보유종목의 `portfolio_group`은 포트폴리오 묶음입니다. 토스는 기존 투자 분류를 읽고, 다른 계좌는 이름을 직접 입력할 수 있습니다. `/portfolio-summary`의 `investment_category` 필터에는 묶음 이름을 전달할 수 있습니다. 배당 목록은 지급일 내림차순이며, `/dividend-summary`에는 선택 파라미터 `month=YYYY-MM`과 `symbol`을 함께 전달할 수 있습니다.
+
+보유종목 금액 일괄 수정의 각 `items` 항목에는 `holding_id`, `expected_version`, `cost_basis`, `market_value`가 필요합니다. 유효하지 않거나 마감됐거나 버전이 달라진 스냅샷이 하나라도 있으면 요청 전체가 거부됩니다.
+
+배당 금액 일괄 수정의 각 `items` 항목에는 `dividend_id`, `expected_version`, `gross_amount`, `tax_amount`가 필요합니다. 순배당은 총배당에서 세금을 빼서 계산하며 한 계좌의 금액을 함께 저장합니다.
+
+배당 일괄 등록의 각 `items` 항목에는 `account_id`, `gross_amount`, 선택 필드 `dividend_group`을 전달합니다. 통화는 계좌에서 가져오며 세금은 0원, 종목은 비어 있는 상태로 저장합니다. 유효하지 않은 항목이 있으면 요청 전체가 거부됩니다.

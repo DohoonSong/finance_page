@@ -22,3 +22,38 @@ def test_journal_cannot_be_retargeted(tmp_path):
     Repository(GoogleSheets('sheet-one', 'unused'), tmp_path)
     with pytest.raises(RuntimeError, match='different spreadsheet'):
         Repository(GoogleSheets('sheet-two', 'unused'), tmp_path)
+
+
+def test_pending_write_identifies_google_permission_denial(tmp_path, caplog):
+    from gspread.exceptions import APIError
+    from finance.schema import AppError
+    from finance.store import MemorySheets
+
+    backend = MemorySheets()
+    response = Mock(status_code=403)
+    response.json.return_value = {'error': {'code': 403, 'message': 'private response'}}
+    backend.apply = Mock(side_effect=APIError(response))
+    repo = Repository(backend, tmp_path)
+    write = operation('settings', 2, {'key': 'display_name', 'value': 'private value'})
+    with pytest.raises(AppError, match='편집자 권한') as failure:
+        repo.mutate('request-403', {}, lambda raw, data: ([[write]], {}))
+    assert failure.value.code == 'write_pending'
+    assert 'request_id=request-403 http_status=403' in caplog.text
+    assert 'private' not in caplog.text
+    with repo.db() as db:
+        assert db.execute('SELECT done FROM requests WHERE id=?', ('request-403',)).fetchone() == (0,)
+
+
+def test_write_verifies_only_owned_columns(tmp_path):
+    from finance.store import MemorySheets
+
+    class SheetsWithExtraColumn(MemorySheets):
+        def read(self):
+            rows = super().read()
+            if len(rows['settings']) > 1:
+                rows['settings'][1].append('outside the app schema')
+            return rows
+
+    repo = Repository(SheetsWithExtraColumn(), tmp_path)
+    write = operation('settings', 2, {'key': 'display_name', 'value': 'owner'})
+    assert repo.mutate('request-200', {}, lambda raw, data: ([[write]], {'ok': True})) == {'ok': True}

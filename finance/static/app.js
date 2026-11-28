@@ -82,7 +82,15 @@ function chart(rows) {
  const points=values.map((v,i)=>`${35+i*530/Math.max(values.length-1,1)},${145-(v-min)/span*110}`).join(' ');
  return `<svg class="chart" viewBox="0 0 600 180" role="img" aria-label="마감 월별 순자산 추이"><line x1="35" x2="565" y1="145" y2="145"/><polyline points="${points}"/>${values.map((v,i)=>`<circle cx="${35+i*530/Math.max(values.length-1,1)}" cy="${145-(v-min)/span*110}" r="4" fill="#176b55"><title>${esc(rows[i].month+': '+money(v))}</title></circle>`).join('')}<text x="35" y="170">${esc(rows[0].month)}</text><text x="510" y="170">${esc(rows.at(-1).month)}</text><text x="35" y="18">${esc(money(max))}</text></svg>`;
 }
-function budgetBars(b) {const flows=['income','expense','investment','debt_principal']; const max=Math.max(1,...flows.map(f=>b[f]));return flows.map(f=>`<div class="bar-row"><span>${words[f]}</span><progress value="${Number(b[f])}" max="${max}" aria-label="${words[f]}"></progress><strong>${money(b[f])}</strong></div>`).join('');}
+function budgetBars(b) {
+ const flows=['income','expense','investment','debt_principal'];
+ const max=Math.max(1,...flows.map(flow=>Math.abs(b[flow])));
+ return flows.map(flow=>{
+  const amount=Number(b[flow]);
+  const negative=amount<0?'negative':'';
+  return `<div class="bar-row ${negative}"><span>${words[flow]}</span><progress value="${Math.abs(amount)}" max="${max}" aria-label="${words[flow]} ${money(amount)}"></progress><strong>${money(amount)}</strong></div>`;
+ }).join('');
+}
 async function getCollection(name, query='') {
  const sequence=loadSequence;
  const rows=await api('/'+name+query);
@@ -386,8 +394,10 @@ async function openEditor(resource, id, flowType, parent=null) {
   const optional=['note','institution','end_month'].includes(key) || (key==='category_3' && !parent);
   const required=optional?'':'required';
   let field;
+  const range=resource==='budgets' && key==='amount'?'min="-9000000000000" max="9000000000000"'
+   :key==='annual_rate'?'min="0" max="100"':key==='profit'?'':'min="0"';
   if(options)field=`<select name="${key}" ${required}>${fk?'<option value="">선택하세요</option>':''}${options.map(([v,label])=>`<option value="${esc(v)}" ${String(value)===String(v)?'selected':''}>${esc(label)}</option>`).join('')}</select>`;
-  else {const type=numeric.has(key)?'number':key.includes('month')?'month':(key==='date'||key.endsWith('_date'))?'date':'text';field=`<input name="${key}" type="${type}" value="${esc(value)}" ${required} ${type==='number'?`step="${key==='annual_rate'?'any':'1'}" ${key==='profit'?'':'min="0"'} ${key==='annual_rate'?'max="100"':''}`:''} ${type==='text'?`maxlength="${key==='note'?1000:200}"`:''}>`;}
+  else {const type=numeric.has(key)?'number':key.includes('month')?'month':(key==='date'||key.endsWith('_date'))?'date':'text';field=`<input name="${key}" type="${type}" value="${esc(value)}" ${required} ${type==='number'?`step="${key==='annual_rate'?'any':'1'}" ${range}`:''} ${type==='text'?`maxlength="${key==='note'?1000:200}"`:''}>`;}
   const label=detailBudget && key==='category'?'1차 분류':detailBudget && key==='category_2'?'2차 항목':labels[key] || key;
   return `<label>${esc(label)}${field}</label>`;
  }).join('');

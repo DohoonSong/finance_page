@@ -69,9 +69,23 @@ def test_create_idempotent_conflict_and_version(send, client):
     assert len(client.get('/api/v1/accounts').json['data']) == 1
 
 
-@pytest.mark.parametrize('amount', [-1, 1.5, '100', True, 10**16])
+@pytest.mark.parametrize('amount', [-9_000_000_000_001, 1.5, '100', True, 10**16])
 def test_integer_money_validation(send, amount):
     assert send('/budgets', {'expected_version': 0, 'month': '2026-10', 'category': '소비', 'item': '검사', 'amount': amount, 'flow_type': 'expense'}).status_code == 422
+
+
+def test_negative_monthly_budget_amount_is_saved_and_applied(send, client):
+    fields = dict(month='2026-10', category='주거', flow_type='debt_principal')
+    row = add(send, 'budgets', item='전세 상환금', amount=-200, **fields)
+    assert row['amount'] == -200
+    updated = send('/budgets/' + row['budget_id'], {'expected_version': 1, 'amount': -250}, 'PATCH')
+    assert updated.json['data']['amount'] == -250
+    summary = client.get('/api/v1/budget-summary?month=2026-10').json['data']
+    assert summary['debt_principal'] == -250
+    assert summary['budget_balance'] == 250
+    assert client.get('/api/v1/assets?date=2026-10-31').json['data']['lease_budget']['lease_total'] == -250
+    copied = send('/budgets/2026-11/copy', {'expected_version': 0, 'source_month': '2026-10'})
+    assert copied.json['data']['items'][0]['amount'] == -250
 
 
 def test_date_and_filter_validation(send, client):

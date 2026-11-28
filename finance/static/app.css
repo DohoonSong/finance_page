@@ -77,3 +77,5 @@
 .lease-budget-heading {
  margin-top: 1.5rem;
 }
+
+.bar-row.negative progress { accent-color: var(--red); }

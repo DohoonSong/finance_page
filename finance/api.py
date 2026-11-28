@@ -11,7 +11,7 @@ from .actuals import download_latest, monthly_actuals, publish
 from .auth import login_required
 from .deployment import deployment_config
 from .schema import AppError
-from .services import (CATEGORY_TABLES, DIVIDEND_GROUPS, TOSS_CATEGORIES, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, lease_budget, month_end, month_value, now, portfolio_summary, reopen, visible_settings, write_record)
+from .services import (CATEGORY_TABLES, DIVIDEND_GROUPS, TOSS_CATEGORIES, asset_balance_groups, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, lease_budget, month_end, month_value, now, portfolio_summary, reopen, visible_settings, write_record)
 from .store import GoogleSheets, operation
 
 bp = Blueprint('api', __name__, url_prefix='/api/v1')
@@ -105,7 +105,8 @@ def copy(month):
 def assets():
     cutoff = date_value(request.args.get('date', datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()))
     data = repository().read()
-    return ok({**assets_summary(data, cutoff), 'lease_budget': lease_budget(data, cutoff[:7])})
+    return ok({**assets_summary(data, cutoff), 'lease_budget': lease_budget(data, cutoff[:7]),
+               'balance_groups': asset_balance_groups(data, cutoff)})
 
 
 def investment_filters(*, allow_portfolio_groups=False):

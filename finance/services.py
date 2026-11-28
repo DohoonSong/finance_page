@@ -207,6 +207,47 @@ def assets_summary(data, cutoff):
     return {'date': cutoff, 'by_currency': dict(groups), 'details': details}
 
 
+def asset_balance_groups(data, cutoff):
+    accounts = {row['account_id']: row for row in data['accounts']}
+    items = {row['asset_id']: row for row in data['asset_items']}
+    investment_names = ('토스증권', 'ISA', '연금저축')
+    deposit_names = ('주택청약저축', '신한운동화적금')
+    investment, deposits = defaultdict(int), defaultdict(int)
+
+    for row in latest(data['holdings'], ('account_id', 'symbol'), cutoff):
+        account = accounts[row['account_id']]
+        name = str(account['name'])
+        if re.search(r'(?<![A-Z])ISA(?![A-Z])', name.upper()):
+            name = 'ISA'
+        elif account['type'] == 'retirement' or '연금저축' in re.sub(r'\s+', '', name) or 'IRP' in name.upper():
+            name = '연금저축'
+        elif is_toss(account):
+            name = '토스증권'
+        investment[name, row['currency']] += int(row['cost_basis'])
+
+    for row in latest(data['asset_snapshots'], ('asset_id',), cutoff):
+        item = items[row['asset_id']]
+        account = accounts[item['account_id']]
+        if account['type'] in ('brokerage', 'retirement'):
+            continue
+        name = str(item['name'])
+        labels = re.sub(r'\s+', '', f"{account['institution']}{name} {account['name']}")
+        known_name = next((label for label in deposit_names if label in labels), None)
+        if item['category'] == 'deposit' or known_name:
+            deposits[known_name or name, account['currency']] += int(row['amount'])
+
+    result = []
+    for kind, names, balances in (('투자 원금', investment_names, investment), ('예적금 잔액', deposit_names, deposits)):
+        for name in (*names, *sorted({name for name, _ in balances} - set(names))):
+            currencies = sorted(currency for label, currency in balances if label == name)
+            if currencies:
+                result.extend({'kind': kind, 'name': name, 'currency': currency,
+                               'amount': balances[name, currency]} for currency in currencies)
+            else:
+                result.append({'kind': kind, 'name': name, 'currency': '', 'amount': None})
+    return result
+
+
 def dividend_summary(data, year, *, account_id=None, category=None, month=None, symbol=None, dividend_group=None):
     groups = defaultdict(lambda: {'gross_amount': 0, 'tax_amount': 0, 'net_amount': 0})
     rows = investment_rows(data, 'dividends') if category or dividend_group else data['dividends']

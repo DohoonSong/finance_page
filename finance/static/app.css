@@ -91,3 +91,6 @@
  cursor: pointer;
  font-weight: 600;
 }
+.asset-records { margin-top: 1rem; }
+.asset-records > summary { cursor: pointer; font-weight: 600; }
+.asset-records[open] > summary { margin-bottom: .75rem; }

@@ -346,3 +346,25 @@ def test_dividend_group_is_manual_and_can_coexist_with_toss_category(send, clien
     assert send(path, {'expected_version': 1, 'dividend_group': '다른 분류'}, 'PATCH').status_code == 422
     assert send(path, {'expected_version': 1, 'dividend_group': '토스증권'}, 'PATCH').status_code == 200
     assert not client.get('/api/v1/settings').json['data']['items']
+
+
+def test_asset_balance_groups_use_month_end_cost_basis_and_deposit_balances(send, client):
+    for name, kind, currency, cost in [
+        ('토스증권', 'brokerage', 'KRW', 100),
+        ('중개형 ISA', 'brokerage', 'KRW', 200),
+        ('하나IRP', 'retirement', 'KRW', 300),
+        ('신투 연금저축', 'brokerage', 'KRW', 400),
+        ('하나IRP 외화', 'retirement', 'USD', 5),
+    ]:
+        a = add(send, 'accounts', name=name, type=kind, currency=currency)
+        for date, basis in [('2026-11-01', cost), ('2026-12-01', cost + 1)]:
+            add(send, 'holdings', date=date, account_id=a['account_id'], symbol='A',
+                name='테스트 종목', cost_basis=basis, market_value=basis * 2, currency=currency)
+    bank = add(send, 'accounts', name='신한', institution='신한', type='bank', currency='KRW')
+    a = add(send, 'asset-items', account_id=bank['account_id'], category='deposit', name='운동화 적금')
+    add(send, 'asset-snapshots', date='2026-11-21', asset_id=a['asset_id'], amount=50)
+    groups = client.get('/api/v1/assets?date=2026-11-30').json['data']['balance_groups']
+    assert {(row['name'], row['currency']): row['amount'] for row in groups} == {
+        ('토스증권', 'KRW'): 100, ('ISA', 'KRW'): 200, ('연금저축', 'KRW'): 700,
+        ('연금저축', 'USD'): 5, ('주택청약저축', ''): None, ('신한운동화적금', 'KRW'): 50,
+    }

@@ -21,7 +21,7 @@ function shiftRate(value, places) {
  return Number(digits+'e'+(Number(exponent)+places));
 }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const labels = {name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',subcategory:'하위 분류',payment_method:'결제 수단',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',lease_deposit:'전세금',lease_repayment:'전세 상환금',lease_total:'계산 잔액',dividend_group:'배당 구분',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
+const labels = {kind:'구분',name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',subcategory:'하위 분류',payment_method:'결제 수단',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',lease_deposit:'전세금',lease_repayment:'전세 상환금',lease_total:'계산 잔액',dividend_group:'배당 구분',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
 const words = {income:'수입',expense:'소비',investment:'투자 배분',transfer:'계좌 이체',debt_principal:'원금 상환',bank:'은행',cash:'현금',brokerage:'증권',retirement:'퇴직연금',other:'기타',deposit:'예금',property:'부동산',open:'진행 중',preparing:'마감 중',closed:'마감',true:'사용',false:'미사용'};
 const numeric = new Set(['amount','day','original_principal','annual_rate','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit']);
 const moneyKeys = new Set(['amount','original_principal','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit','net_worth','assets_total','liabilities_total','unrealized_profit','dividend_total','realized_profit','total_profit','budget_balance','portfolio_profit']);
@@ -81,6 +81,7 @@ function display(row,key) {
  if (key==='income_share') return percentage(row[key]);
  if (key==='annual_rate') return row[key] == null || row[key]==='' ? '—' : annualRateFormat.format(row[key]);
  if (['lease_deposit','lease_repayment','lease_total'].includes(key)) return row[key]==null?'—':money(row[key]);
+ if (key==='amount' && row[key]===null) return '—';
  if (moneyKeys.has(key)) return money(row[key],row.currency || 'KRW');
  if (key==='closed_at') return row[key] ? new Date(row[key]).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}) : '—';
  if (key==='account_id') return collections.accounts?.find(a=>a.account_id===row[key])?.name || row[key];
@@ -340,7 +341,10 @@ async function render(focusFilter=null) {
    html=`<div class="cards asset-cards">${card('일반 자산 + 투자',money(k.assets_total),'선택 월말 기준 · KRW',true)}${card('등록 자산',items.length+'개','투자 계좌는 보유종목으로 관리')}</div>`;
    const assetEdit=items.length?`<label>자산 항목 수정 <select id="asset-to-edit">${selectOptions(items.map(item=>[item.asset_id,item.name]),'','선택하세요')}</select></label>
     <button data-action="edit-asset-item" ${writable?'':'disabled'}>수정</button>`:'';
-   html+=panel('자산 잔액 기록',table(snaps,['date','asset_id','amount','note'],'asset-snapshots'),button('asset-items')+button('asset-snapshots')+assetEdit);
+   const balances=table(summary.balance_groups || [],['kind','name','currency','amount']);
+   const history=`<details class="asset-records"><summary>개별 자산 기록</summary>${table(snaps,['date','asset_id','amount','note'],'asset-snapshots')}</details>`;
+   html+=panel('자산 잔액 기록',balances+history,button('asset-items')+button('asset-snapshots')+assetEdit,
+    '선택 월말 기준. 투자 원금은 최신 보유종목의 취득 원가 합계입니다.');
    const lease=table([summary.lease_budget],['lease_deposit','lease_repayment','lease_total']);
    const loanPanel=panel('대출',table(loans,['name','original_principal','annual_rate','maturity_date'],'liabilities')
     +`<h3 class="lease-budget-heading">전세 계산 잔액</h3>${lease}`,button('liabilities'),

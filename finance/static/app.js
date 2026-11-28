@@ -677,7 +677,7 @@ function openAmountBatch(resource,rows,title) {
  $('#editor-title').textContent=title;
  $('#editor-error').textContent='';
  $('#editor-fields').innerHTML=`<div class="amount-batch-fields">
-  <p class="caption">현재 필터에 해당하는 ${rows.length}건입니다. ${dividends?'순배당은 총배당에서 세금을 빼서 계산합니다.':'평가액은 취득 원가에 손익을 더해 계산합니다. Tab은 취득 원가를 모두 지난 뒤 손익으로 이동합니다.'}</p>
+  <p class="caption">현재 필터에 해당하는 ${rows.length}건입니다. ${dividends?'순배당은 총배당에서 세금을 빼서 계산합니다.':'빈칸은 흐리게 표시된 기존값을 사용합니다. 평가액은 취득 원가와 손익의 합계입니다. Tab은 취득 원가를 모두 지난 뒤 손익으로 이동합니다.'}</p>
   ${rows.map((row,index)=>`<fieldset class="amount-batch-row" data-amount-index="${index}">
    <legend>${esc(dividends?(row.symbol || row.dividend_group || '배당'):`${row.name} (${row.symbol})`)}</legend>
    <p class="caption">${dividends?'':esc(row.date)+' · '}${esc(accountById(row.account_id)?.name || row.account_id)} · ${esc(row.currency)}</p>
@@ -685,20 +685,25 @@ function openAmountBatch(resource,rows,title) {
     value="${esc(row.payment_date)}" required></label>`:''}
    ${inputs.map(key=>`<label>${key==='unrealized_profit'?'손익':labels[key]}<input name="${key}" type="number"
     min="${key==='unrealized_profit'?-9000000000000:0}" max="9000000000000" step="1"
-    value="${esc(key==='unrealized_profit'?Number(row.market_value)-Number(row.cost_basis):row[key])}" required></label>`).join('')}
+    ${dividends?`value="${esc(row[key])}" required`:`placeholder="${esc(key==='unrealized_profit'?Number(row.market_value)-Number(row.cost_basis):row[key])}"`}></label>`).join('')}
    ${dividends?'':`<p class="holding-batch-value">평가액 <output>${esc(money(row.market_value,row.currency))}</output></p>`}
   </fieldset>`).join('')}
  </div>`;
  $('#editor').showModal();
 }
-function holdingMarketValue(fields) {
- return $('[name="cost_basis"]',fields).valueAsNumber + $('[name="unrealized_profit"]',fields).valueAsNumber;
+function holdingBatchValues(fields) {
+ const valueFor=key=>{
+  const input=$(`[name="${key}"]`,fields);
+  return input.value==='' && !input.validity.badInput?Number(input.placeholder):input.valueAsNumber;
+ };
+ const cost_basis=valueFor('cost_basis');
+ return {cost_basis,market_value:cost_basis+valueFor('unrealized_profit')};
 }
 $('#editor-fields').addEventListener('input',e=>{
  if (editor?.resource!=='holdings' || editor.batch!=='amounts') return;
  const fields=e.target.closest('[data-amount-index]');
  if (!fields) return;
- const value=holdingMarketValue(fields);
+ const {market_value:value}=holdingBatchValues(fields);
  const profit=$('[name="unrealized_profit"]',fields);
  profit.setCustomValidity(Number.isFinite(value) && (value<0 || value>9_000_000_000_000)
   ?'계산된 평가액은 0 이상 9조 이하여야 합니다.':'');
@@ -721,7 +726,7 @@ async function saveAmountBatch(form) {
  for (const fields of form.querySelectorAll('[data-amount-index]')) {
   const row=rows[Number(fields.dataset.amountIndex)];
   const values=resource==='holdings'
-   ?{cost_basis:$('[name="cost_basis"]',fields).valueAsNumber,market_value:holdingMarketValue(fields)}
+   ?holdingBatchValues(fields)
    :Object.fromEntries(amounts.map(key=>[key,$(`[name="${key}"]`,fields).valueAsNumber]));
   const date=$('[name="payment_date"]',fields);
   if (date && date.value!==row.payment_date) values.payment_date=date.value;

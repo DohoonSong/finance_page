@@ -283,10 +283,11 @@ function paginationControls(page,pages,attribute,label) {
  </div>`;
 }
 function holdingTable(rows) {
- const pages=Math.max(1,Math.ceil(rows.length/recordsPerPage));
+ const paginate=!filters.account && !filters.category && !filters.holdingName;
+ const pages=paginate?Math.max(1,Math.ceil(rows.length/recordsPerPage)):1;
  holdingPage=Math.min(holdingPage,pages);
  const offset=(holdingPage-1)*recordsPerPage;
- const visible=rows.slice(offset,offset+recordsPerPage).map(row=>({...row,holding_name:row.name}));
+ const visible=(paginate?rows.slice(offset,offset+recordsPerPage):rows).map(row=>({...row,holding_name:row.name}));
  return table(visible,['date','account_id','portfolio_group','holding_name','symbol','cost_basis','market_value','currency'],'holdings')
   +paginationControls(holdingPage,pages,'holding-page','보유종목 페이지');
 }
@@ -303,16 +304,17 @@ function dividendAccountTable(id, rows) {
  if (!months.includes(state.month)) state.month='';
  dividendAccountViews.set(id,state);
  const visible=dividendMonthRows(id,rows);
- const pages=Math.max(1,Math.ceil(visible.length/recordsPerPage));
+ const paginate=!state.month && !filters.dividendGroup && !filters.dividendSymbol;
+ const pages=paginate?Math.max(1,Math.ceil(visible.length/recordsPerPage)):1;
  state.page=Math.min(state.page,pages);
  const offset=(state.page-1)*recordsPerPage;
  const choices=[['','전체 월'],...months.map(month=>[month,Number(month.slice(5))+'월'])];
- const filters=`<div class="budget-filters" role="group" aria-label="지급 월">
+ const monthButtons=`<div class="budget-filters" role="group" aria-label="지급 월">
   ${choices.map(([month,label])=>`<button type="button" data-dividend-month value="${esc(month)}"
    aria-pressed="${month===state.month}">${label}</button>`).join('')}
  </div>`;
  const pagination=paginationControls(state.page,pages,'dividend-page','배당 페이지');
- return filters+table(visible.slice(offset,offset+recordsPerPage),
+ return monthButtons+table(paginate?visible.slice(offset,offset+recordsPerPage):visible,
   ['payment_date','dividend_group','symbol','gross_amount','tax_amount','net_amount','currency'],'dividends')+pagination;
 }
 function dividendAccountSections(rows) {

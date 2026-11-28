@@ -303,3 +303,32 @@ def test_holding_group_and_dividend_order_with_symbol_and_month_filters(send, cl
     assert [row['payment_date'] for row in rows] == ['2026-11-01', '2026-10-10', '2026-10-03']
     summary = client.get('/api/v1/dividend-summary?year=2026&month=2026-10&symbol=AAA').json['data']
     assert [(row['month'], row['net_amount']) for row in summary] == [('2026-10', 30)]
+
+
+def test_lease_amounts_use_only_selected_months_budget(send, client):
+    add(send, 'budgets', month='2026-11', category='주거', item='전세금', amount=1000, flow_type='expense')
+    add(send, 'budgets', month='2026-11', category='주거', item='상환', category_2='전세 상환금',
+        amount=200, flow_type='debt_principal')
+    add(send, 'budgets', month='2026-10', category='주거', item='전세금', amount=900, flow_type='expense')
+    result = client.get('/api/v1/assets?date=2026-11-30').json['data']
+    assert result['lease_budget'] == {'lease_deposit': 1000, 'lease_repayment': 200, 'lease_total': 1200}
+    assert result['by_currency']['KRW']['liabilities_total'] == 0
+    assert client.get('/api/v1/assets?date=2026-09-30').json['data']['lease_budget']['lease_total'] is None
+
+
+def test_dividend_group_is_manual_and_can_coexist_with_toss_category(send, client):
+    a = add(send, 'accounts', name='토스증권', type='brokerage', currency='KRW')
+    fields = dict(payment_date='2026-11-11', account_id=a['account_id'], symbol='ABC',
+                  gross_amount=100, tax_amount=0, net_amount=100, currency='KRW')
+    marked = add(send, 'dividends', dividend_group='ISA', investment_category='ETF', **fields)
+    unmarked = add(send, 'dividends', **fields)
+    rows = client.get('/api/v1/dividends?year=2026').json['data']
+    assert {row['dividend_id']: (row['dividend_group'], row['investment_category']) for row in rows} == {
+        marked['dividend_id']: ('ISA', 'ETF'), unmarked['dividend_id']: ('', ''),
+    }
+    total = client.get('/api/v1/dividend-summary?year=2026&dividend_group=ISA').json['data']
+    assert total[0]['net_amount'] == 100
+    path = '/dividends/' + unmarked['dividend_id']
+    assert send(path, {'expected_version': 1, 'dividend_group': '다른 분류'}, 'PATCH').status_code == 422
+    assert send(path, {'expected_version': 1, 'dividend_group': '토스증권'}, 'PATCH').status_code == 200
+    assert not client.get('/api/v1/settings').json['data']['items']

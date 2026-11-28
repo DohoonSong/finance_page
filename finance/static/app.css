@@ -58,3 +58,22 @@
  height: 1.1rem;
  accent-color: var(--accent);
 }
+
+.budget-tree-root {
+ border: 1px solid var(--line);
+ border-radius: 8px;
+ margin-bottom: .5rem;
+}
+.budget-tree-root-toggle {
+ width: 100%;
+ padding: .7rem .8rem;
+ border: 0;
+ text-align: left;
+}
+.budget-tree-root-toggle strong {
+ margin-left: auto;
+}
+
+.lease-budget-heading {
+ margin-top: 1.5rem;
+}

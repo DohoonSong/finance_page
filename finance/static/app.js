@@ -2,8 +2,9 @@
 const $ = (s, root = document) => root.querySelector(s);
 const workspace = $('#workspace');
 const page = document.body.dataset.page;
+const dividendGroups = JSON.parse(document.body.dataset.dividendGroups);
 const tossCategories = JSON.parse(document.body.dataset.tossCategories);
-const filters = {budget:[null,null], account:'', category:'', holdingName:'', dividendSymbol:'', dividendMonth:''};
+const filters = {budget:[null,null], account:'', category:'', holdingName:'', dividendSymbol:'', dividendMonth:'', dividendGroup:''};
 const actualsEnabled = document.body.dataset.actuals==='true';
 const writable = document.body.dataset.writes === 'true';
 if (['investments','settings'].includes(page)) $('.month-picker').hidden=true;
@@ -20,7 +21,7 @@ function shiftRate(value, places) {
  return Number(digits+'e'+(Number(exponent)+places));
 }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const labels = {name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',subcategory:'하위 분류',payment_method:'결제 수단',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
+const labels = {name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',subcategory:'하위 분류',payment_method:'결제 수단',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',lease_deposit:'전세금',lease_repayment:'전세 상환금',lease_total:'계산 잔액',dividend_group:'배당 구분',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
 const words = {income:'수입',expense:'소비',investment:'투자 배분',transfer:'계좌 이체',debt_principal:'원금 상환',bank:'은행',cash:'현금',brokerage:'증권',retirement:'퇴직연금',other:'기타',deposit:'예금',property:'부동산',open:'진행 중',preparing:'마감 중',closed:'마감',true:'사용',false:'미사용'};
 const numeric = new Set(['amount','day','original_principal','annual_rate','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit']);
 const moneyKeys = new Set(['amount','original_principal','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit','net_worth','assets_total','liabilities_total','unrealized_profit','dividend_total','realized_profit','total_profit','budget_balance','portfolio_profit']);
@@ -33,7 +34,7 @@ const schemas = {
  'liabilities':['name','original_principal','annual_rate','start_date','maturity_date','active'],
  'liability-snapshots':['date','loan_id','balance'],
  'holdings':['date','account_id','symbol','name','cost_basis','market_value','currency','investment_category'],
- 'dividends':['payment_date','account_id','symbol','gross_amount','tax_amount','net_amount','currency','note','investment_category'],
+ 'dividends':['payment_date','account_id','dividend_group','symbol','gross_amount','tax_amount','net_amount','currency','note','investment_category'],
  'realized-gains':['trade_date','account_id','symbol','profit','currency','note','investment_category']
 };
 const titles = {'accounts':'계좌','asset-items':'자산 항목','budgets':'예산','recurring-items':'반복 예산','asset-snapshots':'자산 잔액','liabilities':'대출','liability-snapshots':'대출 잔액','holdings':'보유종목','dividends':'배당','realized-gains':'실현 손익'};
@@ -62,6 +63,7 @@ function card(title, value, hint, highlight=false) { return `<article class="car
 function display(row,key) {
  if (key==='income_share') return percentage(row[key]);
  if (key==='annual_rate') return row[key] == null || row[key]==='' ? '—' : annualRateFormat.format(row[key]);
+ if (['lease_deposit','lease_repayment','lease_total'].includes(key)) return row[key]==null?'—':money(row[key]);
  if (moneyKeys.has(key)) return money(row[key],row.currency || 'KRW');
  if (key==='closed_at') return row[key] ? new Date(row[key]).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}) : '—';
  if (key==='account_id') return collections.accounts?.find(a=>a.account_id===row[key])?.name || row[key];
@@ -171,6 +173,25 @@ function budgetDetailTable(rows, income) {
  const visible=rows.filter(row=>row.flow_type!=='income' && budgetLevels.every((_,level)=>
   filters.budget[level]===null || budgetLevel(row,level)===filters.budget[level]));
  if (!visible.length) return empty();
+ if (filters.budget[0]!==null) return budgetSecondLevel(visible,income,'filtered');
+ const categories=new Map();
+ for (const row of visible) {
+  if (!categories.has(row.category)) categories.set(row.category,[]);
+  categories.get(row.category).push(row);
+ }
+ return Array.from(categories,([category,entries],index)=>{
+  const branchId='budget-category-'+index;
+  const outflows=entries.filter(isBudgetOutflow);
+  const amount=outflows.reduce((sum,row)=>sum+Number(row.amount),0);
+  return `<section class="budget-tree-root">
+   <button type="button" class="budget-tree-toggle budget-tree-root-toggle" aria-expanded="false" aria-controls="${branchId}" data-budget-toggle>
+    <span aria-hidden="true"></span>${esc(category || '미분류')} <strong>${outflows.length?budgetValue(amount,income):''}</strong>
+   </button>
+   <div id="${branchId}" hidden>${budgetSecondLevel(entries,income,branchId)}</div>
+  </section>`;
+ }).join('');
+}
+function budgetSecondLevel(visible,income,prefix) {
  const groups=new Map();
  for (const row of visible) {
   const key=JSON.stringify([row.category,budgetSecond(row),row.flow_type]);
@@ -178,7 +199,7 @@ function budgetDetailTable(rows, income) {
   groups.get(key).push(row);
  }
  const sections=Array.from(groups.values(),(entries,index)=>{
-  const first=entries[0], title=budgetSecond(first), branchId='budget-branch-'+index;
+  const first=entries[0], title=budgetSecond(first), branchId=prefix+'-branch-'+index;
   const branches=entries.filter(row=>row.category_3);
   const parents=entries.filter(row=>!row.category_3);
   const amount=entries.reduce((sum,row)=>sum+Number(row.amount),0);
@@ -266,13 +287,16 @@ async function render(focusFilter=null) {
    if (sequence!==loadSequence) return;
    budgetView={rows,recurring,summary,...actual};
   } else if(page==='assets') {
-   const [accounts, items, loans, snaps, debts, summary]=await Promise.all([getCollection('accounts'),getCollection('asset-items'),getCollection('liabilities'),getCollection('asset-snapshots'),getCollection('liability-snapshots'),api('/assets?date='+month+'-'+new Date(Number(year),Number(month.slice(5)),0).getDate())]);
+   const [accounts, items, loans, snaps, summary]=await Promise.all([getCollection('accounts'),getCollection('asset-items'),getCollection('liabilities'),getCollection('asset-snapshots'),api('/assets?date='+month+'-'+new Date(Number(year),Number(month.slice(5)),0).getDate())]);
    const k=summary.by_currency.KRW;
-   html=`<div class="cards">${card('순자산',money(k.net_worth),'선택 월말 기준',true)}${card('일반 자산 + 투자',money(k.assets_total),'KRW')}${card('대출 잔액',money(k.liabilities_total),'KRW')}${card('등록 자산',items.length+'개','투자 계좌는 보유종목으로 관리')}</div>`;
-   html+=panel('자산 항목',table(items,['name','account_id','category','active'],'asset-items'),button('asset-items'));
-   html+=panel('자산 잔액 기록',table(snaps,['date','asset_id','amount','note'],'asset-snapshots'),button('asset-snapshots'));
-   html+=panel('대출',table(loans,['name','original_principal','annual_rate','maturity_date'],'liabilities'),button('liabilities'),'대출은 KRW로 관리합니다. 연이율은 % 단위로 입력하세요.');
-   html+=panel('대출 잔액 기록',table(debts,['date','loan_id','balance'],'liability-snapshots'),button('liability-snapshots'));
+   html=`<div class="cards">${card('순자산',money(k.net_worth),'선택 월말 기준',true)}${card('일반 자산 + 투자',money(k.assets_total),'KRW')}${card('기록된 총부채',money(k.liabilities_total),'월말 잔액 기록 기준')}${card('등록 자산',items.length+'개','투자 계좌는 보유종목으로 관리')}</div>`;
+   const assetEdit=items.length?`<label>자산 항목 수정 <select id="asset-to-edit">${selectOptions(items.map(item=>[item.asset_id,item.name]),'','선택하세요')}</select></label>
+    <button data-action="edit-asset-item" ${writable?'':'disabled'}>수정</button>`:'';
+   html+=panel('자산 잔액 기록',table(snaps,['date','asset_id','amount','note'],'asset-snapshots'),button('asset-items')+button('asset-snapshots')+assetEdit);
+   const lease=table([summary.lease_budget],['lease_deposit','lease_repayment','lease_total']);
+   html+=panel('대출',table(loans,['name','original_principal','annual_rate','maturity_date'],'liabilities')
+    +`<h3 class="lease-budget-heading">전세 계산 잔액</h3>${lease}`,button('liabilities'),
+    '선택 월 예산의 전세금과 전세 상환금을 합산합니다. 연이율은 % 단위로 입력하세요.');
   } else if(page==='investments') {
    const [accounts, holdings, gains]=await Promise.all([getCollection('accounts'),getCollection('holdings'),getCollection('realized-gains')]);
    if (sequence!==loadSequence) return;
@@ -288,21 +312,22 @@ async function render(focusFilter=null) {
    const [accounts, rows]=await Promise.all([getCollection('accounts'),getCollection('dividends','?year='+year)]);
    if (sequence!==loadSequence) return;
    const accountFilters=investmentFilters(accounts);
-   const scoped=filteredInvestments(rows);
+   const scoped=filteredInvestments(rows).filter(row=>!filters.dividendGroup || row.dividend_group===filters.dividendGroup);
    const symbols=uniqueOptions(scoped,'symbol');
    const months=[...new Set(scoped.map(row=>row.payment_date.slice(0,7)))].sort().reverse();
    if (!symbols.includes(filters.dividendSymbol)) filters.dividendSymbol='';
    if (!months.includes(filters.dividendMonth)) filters.dividendMonth='';
    html=`<div class="record-filters">${accountFilters}
+    ${filterSelect('dividendGroup','배당 구분',dividendGroups.map(value=>[value,value]),'전체 구분')}
     ${filterSelect('dividendSymbol','종목',symbols.map(value=>[value,value]),'전체 종목')}
     ${filterSelect('dividendMonth','지급 월',months.map(value=>[value,value]),'전체 월')}</div>`;
    const visible=scoped.filter(row=>(!filters.dividendSymbol || row.symbol===filters.dividendSymbol)
     && (!filters.dividendMonth || row.payment_date.startsWith(filters.dividendMonth)));
    const summary=await api('/dividend-summary?'+investmentQuery({
-    year,month:filters.dividendMonth,symbol:filters.dividendSymbol,
+    year,month:filters.dividendMonth,symbol:filters.dividendSymbol,dividend_group:filters.dividendGroup,
    }));
    html+=panel(year+'년 월별 배당',table(summary,['month','currency','gross_amount','tax_amount','net_amount']),'','배당은 순자산에 별도 가산하지 않습니다. 현금 잔액에서 한 번 반영하세요.');
-   html+=panel('배당 내역',table(visible,['payment_date','account_id','symbol','investment_category','gross_amount','tax_amount','net_amount','currency'],'dividends'),button('dividends'));
+   html+=panel('배당 내역',table(visible,['payment_date','account_id','dividend_group','symbol','investment_category','gross_amount','tax_amount','net_amount','currency'],'dividends'),button('dividends'));
   } else if(page==='history') {
    const [rows, history]=await Promise.all([api('/closings'),api('/net-worth/history')]);
    collections.closings=rows;
@@ -334,6 +359,9 @@ async function openEditor(resource, id, flowType, parent=null) {
  const detailBudget=resource==='budgets' && (record?.flow_type ?? flowType)!=='income';
  const investment=schemas[resource].includes('investment_category');
  $('#editor-fields').innerHTML=schemas[resource].map(key=>{
+  if(key==='dividend_group') return `<label>배당 구분<select name="dividend_group">
+   ${selectOptions(dividendGroups.map(group=>[group,group]),record?.dividend_group ?? '','미지정')}
+   </select></label>`;
   if(key==='investment_category') {
    const holding=resource==='holdings';
    const field=holding?'portfolio_group':'investment_category';
@@ -428,6 +456,10 @@ workspace.addEventListener('click',async e=>{
    const parent=collections.budgets.find(row=>row.budget_id===el.dataset.addBudgetChild);
    if(parent) await openEditor('budgets',null,parent.flow_type,parent);
   }
+  else if(el.dataset.action==='edit-asset-item'){
+   const id=$('#asset-to-edit').value;
+   if (id) await openEditor('asset-items',id);
+  }
   else if(el.dataset.edit) await openEditor(el.dataset.edit,el.dataset.id);
   else if(el.dataset.delete){const row=collections.budgets.find(r=>r.budget_id===el.dataset.delete);if(confirm(`“${row.item}” 예산을 삭제할까요?`)){await api('/budgets/'+row.budget_id,'DELETE',{expected_version:Number(row.version)});message('삭제했습니다.');await render();}}
   else if(el.dataset.action==='copy'){const source=prompt('복사할 원본 월 (YYYY-MM)');if(source){await api('/budgets/'+monthInput.value+'/copy','POST',{source_month:source,expected_version:0});message('예산을 복사했습니다.');await render();}}
@@ -459,7 +491,7 @@ workspace.addEventListener('change',e=>{
  if (!key) return;
  filters[key]=e.target.value;
  if (key==='account') filters.category='';
- if (key==='account' || key==='category') {
+ if (key==='account' || key==='category' || key==='dividendGroup') {
   filters.holdingName='';
   filters.dividendSymbol='';
   filters.dividendMonth='';

@@ -19,11 +19,13 @@ CATEGORY_PREFIX = 'investment_category/'
 
 BUDGET_CATEGORY_PREFIX = 'budget_category/'
 BUDGET_CATEGORY_FIELDS = ('category_2', 'category_3')
+DIVIDEND_GROUPS = ('토스증권', 'ISA')
+DIVIDEND_GROUP_PREFIX = 'dividend_group/'
 
 
 def visible_settings(data):
     return [row for row in data['settings']
-            if not str(row['key']).startswith((CATEGORY_PREFIX, BUDGET_CATEGORY_PREFIX))]
+            if not str(row['key']).startswith((CATEGORY_PREFIX, BUDGET_CATEGORY_PREFIX, DIVIDEND_GROUP_PREFIX))]
 
 
 def budget_categories(data):
@@ -44,6 +46,20 @@ def budget_rows(data, month):
     categories = budget_categories(data)
     return [{**row, **dict(zip(BUDGET_CATEGORY_FIELDS, categories.get(row['budget_id'], ('', ''))))}
             for row in data['budget_items'] if row['month'] == month]
+
+
+def lease_budget(data, month):
+    names = {'전세금': 'lease_deposit', '전세상환금': 'lease_repayment'}
+    totals = dict.fromkeys(names.values())
+    for row in budget_rows(data, month):
+        for field in ('category_3', 'category_2', 'item', 'category'):
+            key = names.get(re.sub(r'\s+', '', str(row.get(field) or '')))
+            if key:
+                totals[key] = (totals[key] or 0) + int(row['amount'])
+                break
+    totals['lease_total'] = (sum(value or 0 for value in totals.values())
+                             if any(value is not None for value in totals.values()) else None)
+    return totals
 
 
 def budget_category_operation(row, identifier, values, stamp):
@@ -73,6 +89,8 @@ def category_values(data):
 
 def investment_rows(data, table):
     categories = category_values(data)
+    groups = {str(row['key']).removeprefix(DIVIDEND_GROUP_PREFIX): row['value']
+              for row in data['settings'] if str(row['key']).startswith(DIVIDEND_GROUP_PREFIX)}
     toss_ids = {row['account_id'] for row in data['accounts'] if is_toss(row)}
     rows = []
     for row in data[table]:
@@ -80,6 +98,8 @@ def investment_rows(data, table):
         result = {**row, 'investment_category': group if row['account_id'] in toss_ids else ''}
         if table == 'holdings':
             result['portfolio_group'] = group
+        if table == 'dividends':
+            result['dividend_group'] = groups.get(row['dividend_id'], '')
         rows.append(result)
     return rows
 
@@ -187,13 +207,14 @@ def assets_summary(data, cutoff):
     return {'date': cutoff, 'by_currency': dict(groups), 'details': details}
 
 
-def dividend_summary(data, year, *, account_id=None, category=None, month=None, symbol=None):
+def dividend_summary(data, year, *, account_id=None, category=None, month=None, symbol=None, dividend_group=None):
     groups = defaultdict(lambda: {'gross_amount': 0, 'tax_amount': 0, 'net_amount': 0})
-    rows = investment_rows(data, 'dividends') if category else data['dividends']
+    rows = investment_rows(data, 'dividends') if category or dividend_group else data['dividends']
     for r in rows:
         if (r['payment_date'][:4] == year
                 and (not month or r['payment_date'][:7] == month)
                 and (not symbol or r['symbol'] == symbol)
+                and (not dividend_group or r['dividend_group'] == dividend_group)
                 and matches_investment(r, account_id, category)):
             p = groups[(r['payment_date'][:7], r['currency'])]
             for key in p:
@@ -272,6 +293,7 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
         merged = {k: existing[k] for k in MODELS[table].model_fields} if existing else {}
         merged.update(payload)
         category = merged.pop('investment_category', None) if table in CATEGORY_TABLES else None
+        dividend_group = merged.pop('dividend_group', '') if table == 'dividends' else None
         portfolio_group = merged.pop('portfolio_group', None) if table == 'holdings' else None
         if table == 'budget_items':
             previous = budget_categories(data).get(identifier, ('', ''))
@@ -324,6 +346,23 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
             record['investment_category'] = category if toss else ''
             if table == 'holdings':
                 record['portfolio_group'] = category
+        if table == 'dividends':
+            key = DIVIDEND_GROUP_PREFIX + record['dividend_id']
+            previous = next((entry['value'] for entry in data['settings'] if entry['key'] == key), '')
+            if 'dividend_group' not in payload:
+                dividend_group = previous
+            if dividend_group not in ('', *DIVIDEND_GROUPS):
+                raise AppError('배당 구분은 토스증권 또는 ISA를 선택하세요.')
+            if dividend_group != previous:
+                settings_row = next(
+                    (i for i, entry in enumerate(raw['settings'][1:], 2) if entry and entry[0] == key),
+                    len(raw['settings']) + 1 + sum(op['tab'] == 'settings' and op['row'] > len(raw['settings'])
+                                                   for op in operations),
+                )
+                fields = {'key': key, 'value': dividend_group, 'value_type': 'string',
+                          'description': '배당 구분', 'updated_at': stamp} if dividend_group else {}
+                operations.append(operation('settings', settings_row, fields))
+            record['dividend_group'] = dividend_group
         return [operations], record
     return repo.mutate(rid, [table, method, identifier, payload, expected_version], plan)
 

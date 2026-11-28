@@ -11,7 +11,7 @@ from .actuals import download_latest, monthly_actuals, publish
 from .auth import login_required
 from .deployment import update_branch
 from .schema import AppError
-from .services import (CATEGORY_TABLES, TOSS_CATEGORIES, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, month_end, month_value, now, portfolio_summary, reopen, visible_settings, write_record)
+from .services import (CATEGORY_TABLES, DIVIDEND_GROUPS, TOSS_CATEGORIES, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, lease_budget, month_end, month_value, now, portfolio_summary, reopen, visible_settings, write_record)
 from .store import GoogleSheets, operation
 
 bp = Blueprint('api', __name__, url_prefix='/api/v1')
@@ -104,7 +104,8 @@ def copy(month):
 @bp.get('/assets')
 def assets():
     cutoff = date_value(request.args.get('date', datetime.now(ZoneInfo('Asia/Seoul')).date().isoformat()))
-    return ok(assets_summary(repository().read(), cutoff))
+    data = repository().read()
+    return ok({**assets_summary(data, cutoff), 'lease_budget': lease_budget(data, cutoff[:7])})
 
 
 def investment_filters(*, allow_portfolio_groups=False):
@@ -126,7 +127,10 @@ def dividends():
     month = request.args.get('month')
     if month and month_value(month)[:4] != year:
         raise AppError('지급 월이 조회 연도와 일치하지 않습니다.', 400)
-    return ok(dividend_summary(repository().read(), year, month=month,
+    group = request.args.get('dividend_group')
+    if group and group not in DIVIDEND_GROUPS:
+        raise AppError('배당 구분을 확인하세요.', 400)
+    return ok(dividend_summary(repository().read(), year, month=month, dividend_group=group,
                                symbol=request.args.get('symbol'), **investment_filters()))
 
 

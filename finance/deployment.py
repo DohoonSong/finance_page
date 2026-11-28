@@ -5,6 +5,7 @@ import re
 import subprocess
 import time
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import requests
 from filelock import FileLock, Timeout
@@ -15,11 +16,7 @@ from .schema import AppError
 
 bp = Blueprint('deployment', __name__, url_prefix='/api/v1')
 PROJECT = Path(__file__).resolve().parents[1]
-ORIGINS = {
-    'https://github.com/DohoonSong/finance_page.git',
-    'https://github.com/DohoonSong/finance_page',
-    'git@github.com:DohoonSong/finance_page.git',
-}
+REPOSITORY_PATH = '/dohoonsong/finance_page'
 RELOAD_URL = 'https://www.pythonanywhere.com/api/v0/user/cafedoroon/webapps/cafedoroon.pythonanywhere.com/reload/'
 
 
@@ -83,9 +80,30 @@ def git(*args):
     ).stdout.rstrip('\n')
 
 
+def is_project_origin(origin):
+    if origin.lower().startswith('git@github.com:'):
+        origin = 'ssh://git@github.com/' + origin.split(':', 1)[1].lstrip('/')
+    try:
+        url = urlsplit(origin)
+        endpoint = (url.scheme, url.hostname, url.port)
+    except ValueError:
+        return False
+    if url.query or url.fragment:
+        return False
+    if endpoint not in {
+        ('https', 'github.com', None), ('https', 'github.com', 443),
+        ('ssh', 'github.com', None), ('ssh', 'github.com', 22),
+        ('ssh', 'ssh.github.com', 443),
+    }:
+        return False
+    if url.scheme == 'ssh' and (url.username != 'git' or url.password is not None):
+        return False
+    return url.path.rstrip('/').lower().removesuffix('.git') == REPOSITORY_PATH
+
+
 def fast_forward(branch):
-    if git('remote', 'get-url', 'origin') not in ORIGINS:
-        raise AppError('업데이트 원격 저장소가 설정과 다릅니다.', 409, 'deploy_origin')
+    if not is_project_origin(git('remote', 'get-url', 'origin')):
+        raise AppError('서버의 origin이 GitHub 저장소 DohoonSong/finance_page를 가리키는지 확인하세요.', 409, 'deploy_origin')
     if git('branch', '--show-current') != branch:
         raise AppError('서버의 현재 브랜치가 업데이트 설정과 다릅니다.', 409, 'deploy_branch')
     if git('status', '--porcelain'):

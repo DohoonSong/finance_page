@@ -84,3 +84,20 @@ def test_fast_forward_checks_current_branch_and_clean_tree(monkeypatch):
         ('merge', '--ff-only', 'FETCH_HEAD'),
         ('rev-parse', 'HEAD'),
     ]
+
+
+@pytest.mark.parametrize(('origin', 'allowed'), [
+    ('https://github.com/DohoonSong/finance_page.git', True),
+    ('https://github.com/dohoonsong/finance_page/', True),
+    ('https://user:test-only@github.com:443/DohoonSong/finance_page.git', True),
+    ('git@github.com:DohoonSong/finance_page.git', True),
+    ('ssh://git@github.com/DohoonSong/finance_page.git', True),
+    ('ssh://git@ssh.github.com:443/DohoonSong/finance_page.git', True),
+    ('https://github.com/other/finance_page.git', False),
+    ('https://github.com@other.example/DohoonSong/finance_page.git', False),
+    ('https://github.com:8080/DohoonSong/finance_page.git', False),
+    ('https://github.com/DohoonSong/finance_page.git?query=value', False),
+    ('http://github.com/DohoonSong/finance_page.git', False),
+])
+def test_project_origin_only_accepts_equivalent_github_urls(origin, allowed):
+    assert deployment.is_project_origin(origin) is allowed

@@ -122,6 +122,13 @@ def portfolio():
     return ok(portfolio_summary(repository().read(), **investment_filters(allow_portfolio_groups=True)))
 
 
+@bp.get('/dividend-years')
+def dividend_years():
+    rows = repository().read()['dividends']
+    years = {row['payment_date'][:4] for row in rows}
+    return ok(sorted((year for year in years if re.fullmatch(r'[1-9]\d{3}', year)), reverse=True))
+
+
 @bp.get('/dividend-summary')
 def dividends():
     year = selected_year()

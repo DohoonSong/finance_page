@@ -254,8 +254,10 @@ def asset_balance_groups(data, cutoff):
 
 
 def dividend_summary(data, year, *, account_id=None, category=None, month=None, symbol=None, dividend_group=None):
-    groups = defaultdict(lambda: {'gross_amount': 0, 'tax_amount': 0, 'net_amount': 0})
-    rows = investment_rows(data, 'dividends') if category or dividend_group else data['dividends']
+    groups = defaultdict(lambda: {'gross_amount': 0, 'tax_amount': 0, 'net_amount': 0,
+                                  'toss_gross_amount': 0, 'isa_gross_amount': 0})
+    group_fields = {'토스증권': 'toss_gross_amount', 'ISA': 'isa_gross_amount'}
+    rows = investment_rows(data, 'dividends')
     for r in rows:
         if (r['payment_date'][:4] == year
                 and (not month or r['payment_date'][:7] == month)
@@ -263,8 +265,11 @@ def dividend_summary(data, year, *, account_id=None, category=None, month=None, 
                 and (not dividend_group or r['dividend_group'] == dividend_group)
                 and matches_investment(r, account_id, category)):
             p = groups[(r['payment_date'][:7], r['currency'])]
-            for key in p:
+            for key in ('gross_amount', 'tax_amount', 'net_amount'):
                 p[key] += int(r[key])
+            group_field = group_fields.get(r['dividend_group'])
+            if group_field:
+                p[group_field] += int(r['gross_amount'])
     return [{'month': month, 'currency': currency, **v} for (month, currency), v in sorted(groups.items())]
 
 

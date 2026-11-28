@@ -10,8 +10,11 @@ const writable = document.body.dataset.writes === 'true';
 if (['investments','settings'].includes(page)) $('.month-picker').hidden=true;
 const csrf = $('meta[name="csrf-token"]').content;
 const monthInput = $('#month');
+const dividendYear = $('#dividend-year');
 const percentToggle = $('#percent-only');
 monthInput.value = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul',year:'numeric',month:'2-digit'}).format(new Date());
+const currentYear = monthInput.value.slice(0,4);
+if (dividendYear) dividendYear.add(new Option(currentYear+'년',currentYear));
 const today = () => new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul'}).format(new Date());
 const money = (n, c='KRW') => `${Number(n || 0).toLocaleString('ko-KR')} ${c === 'KRW' ? '원' : c}`;
 const incomeShareFormat = new Intl.NumberFormat('ko-KR',{style:'percent',maximumFractionDigits:2});
@@ -21,10 +24,10 @@ function shiftRate(value, places) {
  return Number(digits+'e'+(Number(exponent)+places));
 }
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-const labels = {kind:'구분',name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',subcategory:'하위 분류',payment_method:'결제 수단',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',lease_loan:'전세대출',lease_repayment:'전세 상환금',lease_total:'계산 잔액',dividend_group:'배당 구분',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
+const labels = {kind:'구분',name:'이름',type:'유형',institution:'금융기관',currency:'통화',active:'사용 여부',category:'분류',category_2:'2차 분류',category_3:'3차 분류',portfolio_group:'포트폴리오 묶음',holding_name:'실제 종목명',investment_category:'투자 분류',item:'항목',month:'월',amount:'금액',income_share:'수입 대비',flow_type:'흐름',note:'메모',day:'매월 일자',start_month:'시작월',end_month:'종료월',date:'기준일',subcategory:'하위 분류',payment_method:'결제 수단',account_id:'계좌',asset_id:'자산',loan_id:'대출',original_principal:'최초 원금',annual_rate:'연이율 (%)',lease_loan:'전세대출',lease_repayment:'전세 상환금',lease_total:'계산 잔액',dividend_group:'배당 구분',start_date:'시작일',maturity_date:'만기일',balance:'잔액',symbol:'종목 코드',cost_basis:'취득 원가',market_value:'평가액',payment_date:'배당 지급일',gross_amount:'총배당',toss_gross_amount:'토스증권',isa_gross_amount:'ISA',tax_amount:'세금',net_amount:'순배당',trade_date:'매도일',profit:'실현 손익',version:'버전',status:'상태',revision:'리비전',net_worth:'순자산',closed_at:'마감 시각',cost:'취득 원가',unrealized_profit:'평가 손익',dividend_total:'순배당 누계',realized_profit:'실현 손익',total_profit:'총손익',simple_return_pct:'단순 수익률 (%)',value:'값',key:'설정',description:'설명',source_ref:'원본',assets_total:'자산',liabilities_total:'부채',budget_balance:'예산 잔액',portfolio_profit:'투자 손익',display_name:'표시 이름'};
 const words = {income:'수입',expense:'소비',investment:'투자 배분',transfer:'계좌 이체',debt_principal:'원금 상환',bank:'은행',cash:'현금',brokerage:'증권',retirement:'퇴직연금',other:'기타',deposit:'예금',property:'부동산',open:'진행 중',preparing:'마감 중',closed:'마감',true:'사용',false:'미사용'};
 const numeric = new Set(['amount','day','original_principal','annual_rate','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit']);
-const moneyKeys = new Set(['amount','original_principal','balance','cost_basis','market_value','gross_amount','tax_amount','net_amount','profit','net_worth','assets_total','liabilities_total','unrealized_profit','dividend_total','realized_profit','total_profit','budget_balance','portfolio_profit']);
+const moneyKeys = new Set(['amount','original_principal','balance','cost_basis','market_value','gross_amount','toss_gross_amount','isa_gross_amount','tax_amount','net_amount','profit','net_worth','assets_total','liabilities_total','unrealized_profit','dividend_total','realized_profit','total_profit','budget_balance','portfolio_profit']);
 const schemas = {
  'accounts':['name','type','institution','currency','active'],
  'asset-items':['account_id','category','name','active'],
@@ -389,7 +392,7 @@ async function render(focusFilter=null) {
  try {
   const month=monthInput.value;
   if (!month) throw new Error('조회 월을 선택하세요.');
-  const year=month.slice(0,4);
+  const year=dividendYear?.value || month.slice(0,4);
   let html='';
   if (page==='dashboard') {
    const d=await api('/dashboard?month='+month), k=d.assets.by_currency.KRW;
@@ -435,8 +438,10 @@ async function render(focusFilter=null) {
    html+=panel('보유종목 스냅샷',holdingFilters+table(visible.map(row=>({...row,holding_name:row.name})),['date','account_id','portfolio_group','holding_name','symbol','cost_basis','market_value','currency'],'holdings'),button('holdings'),'청산 시 보유 원가와 평가액을 0으로 기록하세요. 계좌 현금은 CASH 종목으로 관리합니다.');
    html+=panel('실현 손익',table(filteredInvestments(gains),['trade_date','account_id','symbol','investment_category','profit','currency'],'realized-gains'),button('realized-gains'));
   } else if(page==='dividends') {
-   const [,rows]=await Promise.all([getCollection('accounts'),getCollection('dividends','?year='+year)]);
+   const [,rows,years]=await Promise.all([getCollection('accounts'),getCollection('dividends','?year='+year),api('/dividend-years')]);
    if (sequence!==loadSequence) return;
+   const availableYears=[...new Set([currentYear,year,...years])].sort().reverse();
+   dividendYear.replaceChildren(...availableYears.map(value=>new Option(value+'년',value,false,value===year)));
    const scoped=rows.filter(row=>!filters.dividendGroup || row.dividend_group===filters.dividendGroup);
    const symbols=uniqueOptions(scoped,'symbol');
    const months=[...new Set(scoped.map(row=>row.payment_date.slice(0,7)))].sort().reverse();
@@ -453,7 +458,8 @@ async function render(focusFilter=null) {
    }));
    if (sequence!==loadSequence) return;
    dividendVisible=visible;
-   html+=panel(year+'년 월별 배당',table(summary,['month','currency','gross_amount','tax_amount','net_amount']),'','배당은 순자산에 별도 가산하지 않습니다. 현금 잔액에서 한 번 반영하세요.');
+   html+=panel('월별 배당',table(summary,['month','currency','gross_amount','toss_gross_amount','isa_gross_amount','tax_amount','net_amount']),'',
+    '토스증권·ISA 열은 지정된 배당 구분별 총배당입니다. 미지정 배당은 총배당에만 포함됩니다.');
    html+=panel('배당 내역',dividendAccountSections(visible),button('dividends'));
   } else if(page==='history') {
    const [rows, history]=await Promise.all([api('/closings'),api('/net-worth/history')]);
@@ -673,4 +679,8 @@ workspace.addEventListener('change',e=>{
  if (key) changeFilter(key,e.target.value);
 });
 monthInput.addEventListener('change',()=>render());
+dividendYear?.addEventListener('change',()=>{
+ filters.dividendMonth='';
+ render();
+});
 render();

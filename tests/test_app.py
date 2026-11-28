@@ -372,3 +372,24 @@ def test_asset_balance_groups_use_month_end_cost_basis_and_deposit_balances(send
         ('토스증권', 'KRW'): 100, ('ISA', 'KRW'): 200, ('연금저축', 'KRW'): 700,
         ('연금저축', 'USD'): 5, ('주택청약저축', ''): None, ('신한운동화적금', 'KRW'): 50,
     }
+
+
+def test_dividend_years_and_monthly_group_totals(send, client):
+    a = account(send, kind='brokerage')
+    for date, group, amount in [
+        ('2025-11-01', '토스증권', 50),
+        ('2026-11-01', '토스증권', 100),
+        ('2026-11-02', 'ISA', 200),
+        ('2026-11-03', '', 300),
+    ]:
+        add(send, 'dividends', payment_date=date, account_id=a['account_id'], symbol='AAA',
+            gross_amount=amount, tax_amount=0, net_amount=amount, currency='KRW', dividend_group=group)
+    assert client.get('/api/v1/dividend-years').json['data'] == ['2026', '2025']
+    row = client.get('/api/v1/dividend-summary?year=2026').json['data'][0]
+    assert (row['month'], row['gross_amount'], row['toss_gross_amount'], row['isa_gross_amount']) == (
+        '2026-11', 600, 100, 200,
+    )
+    old = client.get('/api/v1/dividend-summary?year=2025').json['data'][0]
+    assert (old['month'], old['gross_amount'], old['toss_gross_amount'], old['isa_gross_amount']) == (
+        '2025-11', 50, 50, 0,
+    )

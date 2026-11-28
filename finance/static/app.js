@@ -359,29 +359,38 @@ function actualDetails(actuals) {
 }
 // Reviewed pairs use both source levels; unlisted pairs await confirmation.
 const spendingMappings=[
- ['식비',['식사/간식','커피/음료','식재료','배달음식'],['생활/소비','식비']],
+ ['식비',['식사/간식','커피/음료','식재료','배달음식','술'],['생활/소비','식비']],
  ['쇼핑비',['의류/잡화','전자제품'],['생활/소비','취미/쇼핑']],
  ['기타/고정비',['통신비'],['고정비','통신비']],
  ['기타/고정비',['보험료'],['고정비','보험']],
  ['기타/고정비',['교통비'],['고정비','교통비']],
- ['기타/고정비',['월세/관리비'],['주거비','주거비']],
+ ['기타/고정비',['월세/관리비','대출이자'],['주거비','주거비']],
 ];
 const spendingPath=(category,subcategory)=>JSON.stringify([category?.trim() || '',subcategory?.trim() || '']);
+const excludedSpending=new Set(['정산','기타/고정비'].map(category=>spendingPath(category,'법카')));
 const spendingTargets=new Map(spendingMappings.flatMap(([category,subcategories,target])=>
  subcategories.map(subcategory=>[spendingPath(category,subcategory),spendingPath(...target)])));
+function spendingTarget(category,subcategory) {
+ if (category==='헌금' || subcategory==='헌금') return spendingPath('헌금','전체');
+ if (category==='문화생활비') return spendingPath('생활/소비','취미/쇼핑');
+ return spendingTargets.get(spendingPath(category,subcategory));
+}
 function compareSpending(budgetRows,actualRows) {
  const budgets=new Map(), pending=new Map();
  for (const row of budgetRows) {
   if (row.flow_type!=='expense') continue;
-  const category=row.category, subcategory=budgetSecond(row);
+  const category=row.category?.trim() || '';
+  const subcategory=category==='헌금'?'전체':budgetSecond(row);
   const key=spendingPath(category,subcategory);
   if (!budgets.has(key)) budgets.set(key,{category,subcategory,budget_amount:0,actual_amount:0,matched:false});
   budgets.get(key).budget_amount+=Number(row.amount);
  }
  for (const row of actualRows) {
   if (row.flow_type!=='expense') continue;
-  const key=spendingPath(row.category,row.subcategory);
-  const target=budgets.get(spendingTargets.get(key));
+  const category=row.category?.trim() || '', subcategory=row.subcategory?.trim() || '';
+  const key=spendingPath(category,subcategory);
+  if (excludedSpending.has(key)) continue;
+  const target=budgets.get(spendingTarget(category,subcategory));
   if (target) {
    target.actual_amount+=Number(row.amount);
    target.matched=true;

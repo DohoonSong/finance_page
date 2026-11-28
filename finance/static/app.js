@@ -452,12 +452,55 @@ function actualPage({actuals, error, budgetRows, budgetError}) {
  return comparison+panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals)}</div>`,'',
   totals+(percentOnly()?'':' · 백업 '+actuals.filename));
 }
+function budgetSpendingComposition(rows,summary) {
+ const groups=[
+  {name:'고정비/주거비',color:'fixed',amount:0},
+  {name:'헌금',color:'giving',amount:0},
+  {name:'생활/소비',color:'living',amount:0},
+  {name:'기타 소비',color:'other',amount:0},
+ ];
+ const categoryIndex=new Map([['고정비',0],['주거비',0],['고정비/주거비',0],['헌금',1],['생활/소비',2]]);
+ let hasOther=false;
+ for (const row of rows) {
+  if (row.flow_type!=='expense') continue;
+  const key=String(row.category || '').replace(/\s+/g,'');
+  const index=categoryIndex.get(key) ?? 3;
+  groups[index].amount+=Number(row.amount);
+  if (index===3) hasOther=true;
+ }
+ const visible=hasOther?groups:groups.slice(0,3);
+ const totalSize=visible.reduce((sum,group)=>sum+Math.abs(group.amount),0);
+ const rectangles=visible.filter(group=>group.amount!==0).map(group=>{
+  const share=Math.abs(group.amount)/totalSize;
+  return `<div class="spend-color-${group.color} ${group.amount<0?'spend-segment-negative':''}"
+   data-spend-share="${share}"></div>`;
+ }).join('');
+ const legend=visible.map(group=>{
+  const share=totalSize?percentage(Math.abs(group.amount)/totalSize):'—';
+  return `<li><span class="spend-swatch spend-color-${group.color}" aria-hidden="true"></span>
+   <span>${group.name}</span><strong>${budgetValue(group.amount,summary.income)}</strong>
+   <span class="caption">소비 구성 ${share}</span></li>`;
+ }).join('');
+ const hint=visible.some(group=>group.amount<0)
+  ?'음수 묶음은 줄무늬로 표시하며, 너비는 금액의 절댓값 비중입니다.':'너비는 각 묶음의 소비 예산 비중입니다.';
+ const chart=rectangles?`<div class="spend-composition" aria-hidden="true">${rectangles}</div>`
+  :'<p class="caption">비중을 표시할 소비 예산이 없습니다.</p>';
+ return panel('소비 구성',chart+`<ul class="spend-legend">${legend}</ul>`,'',
+  `소비 예산 합계 ${budgetValue(summary.expense,summary.income)} · ${hint}`);
+}
+function renderBudgetPage() {
+ workspace.innerHTML=budgetPage(budgetView);
+ for (const segment of workspace.querySelectorAll('[data-spend-share]')) {
+  segment.style.flexGrow=segment.dataset.spendShare;
+ }
+}
 function budgetPage({rows, recurring, summary}) {
  const masked=percentOnly(), income=summary.income;
  const incomeRows=rows.filter(row=>row.flow_type==='income')
   .map(row=>({...row,income_share:incomeShare(row.amount,income)}));
  const expenseTotals=budgetCategoryTotals(rows.filter(isBudgetOutflow),income);
- let html=`<div class="cards">${card('수입',budgetValue(income,income),'월 예산')}${card('소비',budgetValue(summary.expense,income),'투자 및 원금 상환 제외')}${card('투자 배분',budgetValue(summary.investment,income),'자산으로 이동하는 금액')}${card('예산 잔액',budgetValue(summary.budget_balance,income),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
+ let html=`<div class="cards budget-cards">${card('수입',budgetValue(income,income),'월 예산')}${card('투자 배분',budgetValue(summary.investment,income),'자산으로 이동하는 금액')}${card('예산 잔액',budgetValue(summary.budget_balance,income),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
+ html+=budgetSpendingComposition(rows,summary);
  html+=panel('수입 항목',table(incomeRows,masked?['category','item','income_share']:['category','item','amount','note'],masked?null:'budgets'),
   masked?'':`<button data-add="budgets" data-flow-type="income" ${writable?'':'disabled'}>+ 수입</button>`,
   `수입 합계 ${budgetValue(income,income)}${!masked && income>0?' · 100%':''}`);
@@ -472,7 +515,7 @@ function budgetPage({rows, recurring, summary}) {
  return html;
 }
 percentToggle?.addEventListener('change',()=>{
- if (page==='budgets' && budgetView) workspace.innerHTML=budgetPage(budgetView);
+ if (page==='budgets' && budgetView) renderBudgetPage();
  if (page==='actuals' && actualView) workspace.innerHTML=actualPage(actualView);
  $('#message').hidden=true;
 });
@@ -572,7 +615,10 @@ async function render(focusFilter=null) {
   }
   const preferences=page==='settings'?settings:await api('/settings');
   const displayName=preferences.items.find(r=>r.key==='display_name')?.value || '나의 재무';
-  if(sequence===loadSequence) {workspace.innerHTML=page==='budgets'?budgetPage(budgetView):page==='actuals'?actualPage(actualView):html;if(focusFilter) {
+  if(sequence===loadSequence) {
+   if (page==='budgets') renderBudgetPage();
+   else workspace.innerHTML=page==='actuals'?actualPage(actualView):html;
+   if(focusFilter) {
    const target=$(`[data-holding-filter="${focusFilter}"][aria-pressed="true"]`,workspace)
     || $(`[data-filter="${focusFilter}"]`,workspace);
    target?.focus({preventScroll:true});

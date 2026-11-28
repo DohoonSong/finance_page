@@ -141,3 +141,37 @@
  gap: .75rem;
  margin-top: .75rem;
 }
+
+.budget-cards {
+ grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+}
+.spend-composition {
+ display: flex;
+ min-height: 3rem;
+ overflow: hidden;
+ border-radius: 8px;
+}
+.spend-composition > div { flex: 0 0 0%; min-width: 0; }
+.spend-color-fixed { background-color: #176b55; }
+.spend-color-giving { background-color: #6b4ab6; }
+.spend-color-living { background-color: #b45720; }
+.spend-color-other { background-color: #637484; }
+.spend-segment-negative {
+ background-image: repeating-linear-gradient(135deg, transparent 0 6px, #ffffff80 6px 9px);
+}
+.spend-legend {
+ display: grid;
+ grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+ gap: .75rem;
+ padding: 0;
+ margin: 1rem 0 0;
+ list-style: none;
+}
+.spend-legend li {
+ display: grid;
+ grid-template-columns: .75rem 1fr;
+ align-items: center;
+ gap: .25rem .5rem;
+}
+.spend-legend li > strong, .spend-legend li > .caption { grid-column: 2; }
+.spend-swatch { width: .65rem; height: .65rem; border-radius: 2px; }

@@ -40,6 +40,7 @@ const schemas = {
 const titles = {'accounts':'계좌','asset-items':'자산 항목','budgets':'예산','recurring-items':'반복 예산','asset-snapshots':'자산 잔액','liabilities':'대출','liability-snapshots':'대출 잔액','holdings':'보유종목','dividends':'배당','realized-gains':'실현 손익'};
 const idKeys = {'accounts':'account_id','asset-items':'asset_id','budgets':'budget_id','recurring-items':'recurring_id','asset-snapshots':'snapshot_id','liabilities':'loan_id','liability-snapshots':'snapshot_id','holdings':'holding_id','dividends':'dividend_id','realized-gains':'gain_id'};
 let budgetView = null;
+const actualFilters = {category:null, subcategory:null};
 let collections = {}, editor = null, closingPreview = null, settings = null, loadSequence = 0;
 const pendingRequests = new Map();
 async function api(path, method='GET', data) {
@@ -231,6 +232,29 @@ function budgetSecondLevel(visible,income,prefix) {
  return `<div class="table-wrap"><table><thead><tr>${headers.map(label=>
   `<th scope="col">${label}</th>`).join('')}</tr></thead>${sections}</table></div>`;
 }
+function actualFilter(key, label, rows) {
+ const options=[...new Set(rows.map(row=>row[key] || ''))].sort((a,b)=>a.localeCompare(b,'ko'));
+ if (!options.includes(actualFilters[key])) actualFilters[key]=null;
+ const choices=options.map(value=>[JSON.stringify(value),value || '미분류']);
+ return `<label>${label}<select data-actual-filter="${key}" aria-label="${label}" ${options.length?'':'disabled'}>
+  ${selectOptions(choices,JSON.stringify(actualFilters[key]),'전체')}</select></label>`;
+}
+function actualDetails(actuals) {
+ const category=actualFilter('category','실제 거래 분류',actuals.items);
+ const grouped=actuals.items.filter(row=>actualFilters.category===null || (row.category || '')===actualFilters.category);
+ const subcategory=actualFilter('subcategory','실제 거래 하위 분류',grouped);
+ const rows=grouped.filter(row=>actualFilters.subcategory===null || (row.subcategory || '')===actualFilters.subcategory)
+  .map(row=>({...row,
+   date:row.date.endsWith('-50')?row.date.slice(0,7)+' (일자 미확정)':row.date,
+   item:row.description,note:row.memo,
+   income_share:row.flow_type==='transfer'?null:incomeShare(row.amount,actuals.totals.income),
+  }));
+ const fields=percentOnly()
+  ?['date','flow_type','category','subcategory','income_share']
+  :['date','flow_type','category','subcategory','item','amount','payment_method','note'];
+ const content=rows.length?table(rows,fields):empty('표시할 실제 거래가 없습니다.');
+ return `<div class="record-filters">${category}${subcategory}</div>${content}`;
+}
 function budgetPage({rows, recurring, summary, actuals, actualError}) {
  const masked=percentOnly(), income=summary.income;
  const incomeRows=rows.filter(row=>row.flow_type==='income')
@@ -249,14 +273,7 @@ function budgetPage({rows, recurring, summary, actuals, actualError}) {
   masked?'':'2차 금액은 직접 입력한 금액과 3차 항목의 합계입니다. 기존 금액을 나눌 때는 2차 금액도 함께 조정하세요.');
  if (actuals) {
   const actualIncome=actuals.totals.income;
-  const actualRows=actuals.items.map(row=>({...row,
-   date:row.date.endsWith('-50')?row.date.slice(0,7)+' (일자 미확정)':row.date,
-   item:row.description,note:row.memo,
-   income_share:row.flow_type==='transfer'?null:incomeShare(row.amount,actualIncome),
-  }));
-  html+=panel('실제 수입·지출',table(actualRows,masked
-   ?['date','flow_type','category','subcategory','income_share']
-   :['date','flow_type','category','subcategory','item','amount','payment_method','note']),'',
+  html+=panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals)}</div>`,'',
    actuals.filename?`실제 수입 ${budgetValue(actualIncome,actualIncome)} · 실제 지출 ${budgetValue(actuals.totals.expense,actualIncome)}${masked?'':' · 백업 '+actuals.filename}`
     :'설정에서 최신 ClevMoney 백업을 가져올 수 있습니다.');
  } else if (actualError) {
@@ -497,6 +514,16 @@ workspace.addEventListener('click',async e=>{
  } catch(err){message(err.message,true);} finally{el.disabled=false;}
 });
 workspace.addEventListener('change',e=>{
+ const actualKey=e.target.dataset.actualFilter;
+ if (actualKey) {
+  if (workspace.hasAttribute('aria-busy')) return;
+  actualFilters[actualKey]=e.target.value?JSON.parse(e.target.value):null;
+  if (actualKey==='category') actualFilters.subcategory=null;
+  const details=$('#actual-details');
+  details.innerHTML=actualDetails(budgetView.actuals);
+  $(`[data-actual-filter="${actualKey}"]`,details)?.focus();
+  return;
+ }
  const key=e.target.dataset.filter;
  if (!key) return;
  filters[key]=e.target.value;

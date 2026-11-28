@@ -293,12 +293,16 @@ function dividendAccountSections(rows) {
   </section>`;
  }).join('');
 }
-function actualFilter(key, label, rows) {
+function actualFilterButtons(key, label, rows) {
  const options=[...new Set(rows.map(row=>row[key] || ''))].sort((a,b)=>a.localeCompare(b,'ko'));
  if (!options.includes(actualFilters[key])) actualFilters[key]=null;
- const choices=options.map(value=>[JSON.stringify(value),value || '미분류']);
- return `<label>${label}<select data-actual-filter="${key}" aria-label="${label}" ${options.length?'':'disabled'}>
-  ${selectOptions(choices,JSON.stringify(actualFilters[key]),'전체')}</select></label>`;
+ if (!options.length) return '';
+ const choices=[[null,'전체'],...options.map(value=>[value,value || '미분류'])];
+ return `<div class="budget-filters" role="group" aria-label="${label}">
+  <span class="budget-filter-label">${label}</span>
+  ${choices.map(([value,name])=>`<button type="button" data-actual-filter="${key}" data-all="${value===null}"
+   value="${esc(value)}" aria-pressed="${actualFilters[key]===value}">${esc(name)}</button>`).join('')}
+ </div>`;
 }
 function actualExpenseGroups(rows, fields, income) {
  const categories=new Map();
@@ -324,30 +328,34 @@ function actualExpenseGroups(rows, fields, income) {
   </details>`).join('')}
  </section>`).join('');
 }
+function actualExpenseDetails(rows, fields, income) {
+ const categories=actualFilterButtons('category','1차 소비 분류',rows);
+ const grouped=rows.filter(row=>actualFilters.category===null || (row.category || '')===actualFilters.category);
+ let subcategories='';
+ if (actualFilters.category===null) actualFilters.subcategory=null;
+ else subcategories=actualFilterButtons('subcategory','2차 소비 분류',grouped);
+ const visible=grouped.filter(row=>actualFilters.subcategory===null || (row.subcategory || '')===actualFilters.subcategory);
+ const content=visible.length?actualExpenseGroups(visible,fields,income):'<p class="caption">표시할 거래가 없습니다.</p>';
+ return categories+subcategories+content;
+}
 function actualDetails(actuals) {
- const category=actualFilter('category','실제 거래 분류',actuals.items);
- const grouped=actuals.items.filter(row=>actualFilters.category===null || (row.category || '')===actualFilters.category);
- const subcategory=actualFilter('subcategory','실제 거래 하위 분류',grouped);
- const rows=grouped.filter(row=>actualFilters.subcategory===null || (row.subcategory || '')===actualFilters.subcategory)
-  .map(row=>({...row,
-   date:row.date.endsWith('-50')?row.date.slice(0,7)+' (일자 미확정)':row.date,
-   item:row.description,note:row.memo,
-   income_share:row.flow_type==='transfer'?null:incomeShare(row.amount,actuals.totals.income),
-  }));
+ const income=actuals.totals.income;
+ const rows=actuals.items.map(row=>({...row,
+  date:row.date.endsWith('-50')?row.date.slice(0,7)+' (일자 미확정)':row.date,
+  item:row.description,note:row.memo,
+  income_share:row.flow_type==='transfer'?null:incomeShare(row.amount,income),
+ }));
  const fields=percentOnly()
   ?['date','category','subcategory','income_share']
   :['date','category','subcategory','item','amount','payment_method','note'];
- const tables=[['income','실제 수입'],['expense','실제 소비'],['transfer','계좌 이체']]
+ return [['income','실제 수입'],['expense','실제 소비'],['transfer','계좌 이체']]
   .map(([flow,label])=>{
    const matching=rows.filter(row=>row.flow_type===flow);
    if (flow==='transfer' && !matching.length) return '';
-   let content='<p class="caption">표시할 거래가 없습니다.</p>';
-   if (matching.length) {
-    content=flow==='expense'?actualExpenseGroups(matching,fields,actuals.totals.income):table(matching,fields);
-   }
+   const content=flow==='expense'?actualExpenseDetails(matching,fields,income)
+    :matching.length?table(matching,fields):'<p class="caption">표시할 거래가 없습니다.</p>';
    return `<section class="actual-table"><h3>${label}</h3>${content}</section>`;
   }).join('');
- return `<div class="record-filters">${category}${subcategory}</div>${tables}`;
 }
 // Reviewed pairs use both source levels; unlisted pairs await confirmation.
 const spendingMappings=[
@@ -635,6 +643,16 @@ function changeFilter(key,value) {
 }
 workspace.addEventListener('click',async e=>{
  const el=e.target.closest('button');if(!el || el.disabled)return;
+ if (el.dataset.actualFilter) {
+  if (workspace.hasAttribute('aria-busy')) return;
+  const key=el.dataset.actualFilter;
+  actualFilters[key]=el.dataset.all==='true'?null:el.value;
+  if (key==='category') actualFilters.subcategory=null;
+  const details=$('#actual-details');
+  details.innerHTML=actualDetails(actualView.actuals);
+  $(`[data-actual-filter="${key}"][aria-pressed="true"]`,details)?.focus({preventScroll:true});
+  return;
+ }
  if (el.dataset.holdingFilter) {
   if (!workspace.hasAttribute('aria-busy')) changeFilter(el.dataset.holdingFilter,el.value);
   return;
@@ -709,16 +727,6 @@ workspace.addEventListener('click',async e=>{
  } catch(err){message(err.message,true);} finally{el.disabled=false;}
 });
 workspace.addEventListener('change',e=>{
- const actualKey=e.target.dataset.actualFilter;
- if (actualKey) {
-  if (workspace.hasAttribute('aria-busy')) return;
-  actualFilters[actualKey]=e.target.value?JSON.parse(e.target.value):null;
-  if (actualKey==='category') actualFilters.subcategory=null;
-  const details=$('#actual-details');
-  details.innerHTML=actualDetails(actualView.actuals);
-  $(`[data-actual-filter="${actualKey}"]`,details)?.focus();
-  return;
- }
  if ('dividendAccountFilter' in e.target.dataset) {
   const section=e.target.closest('[data-dividend-account]');
   const id=section.dataset.dividendAccount;

@@ -156,13 +156,20 @@ function filteredInvestments(rows) {
  return rows.filter(row=>(!filters.account || row.account_id===filters.account)
   && (!filters.category || row.investment_category===filters.category));
 }
-function budgetCategoryTotals(rows) {
+function budgetCategoryTotals(rows,income) {
  const totals=new Map();
  for (const row of rows) {
   const category=row.category || '';
-  totals.set(category,(totals.get(category) ?? 0)+Number(row.amount));
+  if (!totals.has(category)) totals.set(category,{amount:0, items:new Set()});
+  const total=totals.get(category);
+  total.amount+=Number(row.amount);
+  const item=budgetSecond(row);
+  if (item) total.items.add(item);
  }
- return [...totals].sort(([a],[b])=>a.localeCompare(b,'ko'));
+ return [...totals].sort(([a],[b])=>a.localeCompare(b,'ko')).map(([category,{amount,items}])=>({
+  category:(category || '미분류')+(items.size?` (${[...items].join(', ')})`:''),
+  amount,income_share:incomeShare(amount,income),
+ }));
 }
 const isBudgetOutflow = row => ['expense','investment','debt_principal'].includes(row.flow_type);
 const incomeShare = (amount,income) => income>0?Number(amount)/income:null;
@@ -277,9 +284,7 @@ function budgetPage({rows, recurring, summary, actuals, actualError}) {
  const masked=percentOnly(), income=summary.income;
  const incomeRows=rows.filter(row=>row.flow_type==='income')
   .map(row=>({...row,income_share:incomeShare(row.amount,income)}));
- const expenseTotals=budgetCategoryTotals(rows.filter(isBudgetOutflow)).map(([category,amount])=>({
-  category:category || '미분류',amount,income_share:incomeShare(amount,income),
- }));
+ const expenseTotals=budgetCategoryTotals(rows.filter(isBudgetOutflow),income);
  let html=`<div class="cards">${card('수입',budgetValue(income,income),'월 예산')}${card('소비',budgetValue(summary.expense,income),'투자 및 원금 상환 제외')}${card('투자 배분',budgetValue(summary.investment,income),'자산으로 이동하는 금액')}${card('예산 잔액',budgetValue(summary.budget_balance,income),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
  html+=panel('수입 항목',table(incomeRows,masked?['category','item','income_share']:['category','item','amount','note'],masked?null:'budgets'),
   masked?'':`<button data-add="budgets" data-flow-type="income" ${writable?'':'disabled'}>+ 수입</button>`,

@@ -224,5 +224,10 @@
 .dividend-account-heading { display: flex; gap: .75rem; align-items: center; justify-content: space-between; margin-bottom: .5rem; }
 .dividend-account-heading > h3 { margin: 0; }
 
+.amount-batch-row input[placeholder]::placeholder {
+ color: #2963a3;
+ opacity: 1;
+}
+
 .holding-batch-value { display: flex; justify-content: space-between; gap: .5rem; }
 .holding-batch-value output { font-weight: 700; }

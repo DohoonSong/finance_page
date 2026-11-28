@@ -677,7 +677,7 @@ function openAmountBatch(resource,rows,title) {
  $('#editor-title').textContent=title;
  $('#editor-error').textContent='';
  $('#editor-fields').innerHTML=`<div class="amount-batch-fields">
-  <p class="caption">현재 필터에 해당하는 ${rows.length}건입니다. ${dividends?'순배당은 총배당에서 세금을 빼서 계산합니다.':'빈칸은 흐리게 표시된 기존값을 사용합니다. 평가액은 취득 원가와 손익의 합계입니다. Tab은 취득 원가를 모두 지난 뒤 손익으로 이동합니다.'}</p>
+  <p class="caption">현재 필터에 해당하는 ${rows.length}건입니다. ${dividends?'순배당은 총배당에서 세금을 빼서 계산합니다.':'파란색 숫자는 기존값입니다. 빈칸으로 두면 이 값을 사용합니다. 평가액은 취득 원가와 손익의 합계입니다. Tab은 취득 원가를 모두 지난 뒤 손익으로 이동합니다.'}</p>
   ${rows.map((row,index)=>`<fieldset class="amount-batch-row" data-amount-index="${index}">
    <legend>${esc(dividends?(row.symbol || row.dividend_group || '배당'):`${row.name} (${row.symbol})`)}</legend>
    <p class="caption">${dividends?'':esc(row.date)+' · '}${esc(accountById(row.account_id)?.name || row.account_id)} · ${esc(row.currency)}</p>

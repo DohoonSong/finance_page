@@ -202,3 +202,17 @@
 @media (max-width: 570px) {
  .dividend-batch-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+
+.holding-batch-dialog { width: min(720px, 94vw); }
+.holding-batch-fields { grid-column: 1 / -1; }
+.holding-batch-row {
+ display: grid;
+ grid-template-columns: repeat(2, minmax(0, 1fr));
+ gap: .45rem .7rem;
+ border: 1px solid var(--line);
+ border-radius: 8px;
+ min-width: 0;
+ margin: 0 0 .65rem;
+ padding: .65rem;
+}
+.holding-batch-row > p { grid-column: 1 / -1; margin: 0; }

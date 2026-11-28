@@ -435,6 +435,44 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
     return repo.mutate(rid, [table, method, identifier, payload, expected_version], plan)
 
 
+def update_holding_amounts(repo, rid, rows):
+    table = 'holdings'
+    fields = {'holding_id', 'expected_version', 'cost_basis', 'market_value'}
+    if not isinstance(rows, list) or not rows:
+        raise AppError('수정할 보유종목을 입력하세요.')
+
+    def plan(raw, data):
+        holdings = {row['holding_id']: row for row in data[table]}
+        seen = set()
+        operations = []
+        stamp = now()
+        for index, row in enumerate(rows, 1):
+            try:
+                if not isinstance(row, dict) or set(row) != fields:
+                    raise AppError('종목 ID, 버전, 취득 원가와 평가액이 필요합니다.')
+                identifier = row['holding_id']
+                if not isinstance(identifier, str) or identifier in seen:
+                    raise AppError('유효한 종목 ID를 중복 없이 입력하세요.')
+                seen.add(identifier)
+                existing = holdings.get(identifier)
+                if existing is None:
+                    raise AppError('항목을 찾을 수 없습니다.', 404, 'not_found')
+                version = row['expected_version']
+                if type(version) is not int or version != int(existing['version']):
+                    raise AppError('다른 변경이 있습니다. 새로고침 후 다시 시도하세요.', 409, 'version_conflict')
+                assert_open(data, table, existing)
+                payload = {key: existing[key] for key in MODELS[table].model_fields}
+                payload.update(cost_basis=row['cost_basis'], market_value=row['market_value'])
+                record = validate_record(table, payload, data, existing)
+            except AppError as exc:
+                raise AppError(f'{index}번째 보유종목: {exc}', exc.status, exc.code) from exc
+            updated = {**existing, **record, 'version': version + 1, 'updated_at': stamp}
+            operations.append(operation(table, row_for(raw, table, identifier), updated))
+        return [operations], {'updated': len(operations)}
+
+    return repo.mutate(rid, [table, 'batch', rows], plan)
+
+
 def create_dividend_batch(repo, rid, payment_date, rows):
     payment_date = date_value(payment_date)
     if not isinstance(rows, list) or not 1 <= len(rows) <= 50:

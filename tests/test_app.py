@@ -421,3 +421,39 @@ def test_dividend_batch_is_atomic_and_idempotent(send, client):
     assert all(r['symbol'] == '' and r['tax_amount'] == 0 for r in records)
     updated = send('/dividends/' + records[0]['dividend_id'], {'expected_version': 1, 'note': '확인'}, 'PATCH')
     assert updated.status_code == 200
+
+
+def test_holding_amount_batch_is_atomic_and_idempotent(send, client):
+    broker = account(send, kind='brokerage')
+    holdings = [
+        add(send, 'holdings', date='2026-10-01', account_id=broker['account_id'],
+            symbol=symbol, name=symbol, cost_basis=100, market_value=200,
+            currency='KRW', portfolio_group='장기 투자')
+        for symbol in ('AAA', 'BBB')
+    ]
+    items = [
+        {'holding_id': row['holding_id'], 'expected_version': 1,
+         'cost_basis': index * 10, 'market_value': index * 20}
+        for index, row in enumerate(holdings)
+    ]
+
+    def records():
+        return client.get('/api/v1/holdings').json['data']
+
+    for extra, status, code in (
+        ({'market_value': -1}, 422, None),
+        ({'expected_version': 0}, 409, 'version_conflict'),
+        ({'holding_id': items[0]['holding_id']}, 422, None),
+    ):
+        failure = send('/holdings/batch', {'items': [items[0], {**items[1], **extra}]}, 'PATCH')
+        assert failure.status_code == status
+        if code:
+            assert failure.json['error']['code'] == code
+        assert all(row['version'] == 1 and row['market_value'] == 200 for row in records())
+
+    rid = str(uuid4())
+    response = send('/holdings/batch', {'items': items}, 'PATCH', rid=rid)
+    assert response.json['data'] == {'updated': 2}
+    assert send('/holdings/batch', {'items': items}, 'PATCH', rid=rid).json == response.json
+    assert [(row['cost_basis'], row['market_value'], row['version'], row['portfolio_group'])
+            for row in records()] == [(0, 0, 2, '장기 투자'), (10, 20, 2, '장기 투자')]

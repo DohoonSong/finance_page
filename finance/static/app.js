@@ -588,7 +588,8 @@ async function render(focusFilter=null) {
    if (sequence!==loadSequence) return;
    holdingVisible=visible;
    html+=panel('계좌별 수익',table(summary,['name','currency','cost_basis','market_value','unrealized_profit','dividend_total','realized_profit','total_profit','simple_return_pct']),'','계좌·종목별 최신 평가액. 순배당과 실현 손익은 누적 값이며 단순 수익률은 시간가중 수익률이 아닙니다.');
-   html+=panel('보유종목 스냅샷',holdingFilters+`<div id="holding-results">${holdingTable(holdingVisible)}</div>`,button('holdings'),'청산 시 보유 원가와 평가액을 0으로 기록하세요. 계좌 현금은 CASH 종목으로 관리합니다.');
+   html+=panel('보유종목 스냅샷',holdingFilters+`<div id="holding-results">${holdingTable(holdingVisible)}</div>`,button('holdings')+
+    `<button type="button" data-action="edit-holdings" ${writable && visible.length?'':'disabled'}>수정</button>`,'청산 시 보유 원가와 평가액을 0으로 기록하세요. 계좌 현금은 CASH 종목으로 관리합니다.');
    html+=panel('실현 손익',table(filteredInvestments(gains),['trade_date','account_id','symbol','investment_category','profit','currency'],'realized-gains'),button('realized-gains'));
   } else if(page==='dividends') {
    const [,rows,years,summary]=await Promise.all([
@@ -639,6 +640,43 @@ async function render(focusFilter=null) {
   }$('.brand > span:last-child').firstChild.nodeValue=displayName;}
  } catch(e) {if(sequence===loadSequence)message(e.message,true);} finally {if(sequence===loadSequence){$('#loading').hidden=true;workspace.removeAttribute('aria-busy');}}
 }
+function openHoldingBatch() {
+ editor={batch:'holdings',rows:holdingVisible};
+ $('#editor').classList.remove('dividend-batch-dialog');
+ $('#editor').classList.add('holding-batch-dialog');
+ $('#editor-title').textContent='보유종목 금액 일괄 수정';
+ $('#editor-error').textContent='';
+ $('#editor-fields').innerHTML=`<div class="holding-batch-fields">
+  <p class="caption">현재 필터에 해당하는 스냅샷 ${editor.rows.length}건입니다. 기준일을 확인하고 바꿀 금액을 입력하세요.</p>
+  ${editor.rows.map((row,index)=>`<fieldset class="holding-batch-row" data-holding-index="${index}">
+   <legend>${esc(row.name)} (${esc(row.symbol)})</legend>
+   <p class="caption">${esc(row.date)} · ${esc(accountById(row.account_id)?.name || row.account_id)} · ${esc(row.currency)}</p>
+   ${['cost_basis','market_value'].map(key=>`<label>${labels[key]}<input name="${key}" type="number"
+    min="0" max="9000000000000" step="1" value="${esc(row[key])}" required></label>`).join('')}
+  </fieldset>`).join('')}
+ </div>`;
+ $('#editor').showModal();
+}
+async function saveHoldingBatch(form) {
+ const items=[];
+ for (const fields of form.querySelectorAll('[data-holding-index]')) {
+  const row=editor.rows[Number(fields.dataset.holdingIndex)];
+  const cost_basis=$('[name="cost_basis"]',fields).valueAsNumber;
+  const market_value=$('[name="market_value"]',fields).valueAsNumber;
+  if (cost_basis!==Number(row.cost_basis) || market_value!==Number(row.market_value)) {
+   items.push({holding_id:row.holding_id,expected_version:Number(row.version),cost_basis,market_value});
+  }
+ }
+ if (!items.length) {
+  $('#editor-error').textContent='변경한 금액이 없습니다.';
+  return;
+ }
+ const result=await api('/holdings/batch','PATCH',{items});
+ $('#editor').close();
+ message(`보유종목 ${result.updated}건을 수정했습니다.`);
+ await render();
+}
+$('#editor').addEventListener('close',()=>$('#editor').classList.remove('holding-batch-dialog'));
 function addDividendBatchRow() {
  const container=$('#dividend-batch-rows');
  const choices=collections.accounts.filter(account=>investmentAccount(account)
@@ -658,7 +696,7 @@ function syncDividendBatchControls() {
  for (const row of rows) $('[data-dividend-batch-remove]',row).disabled=rows.length===1;
 }
 function openDividendBatch() {
- editor={resource:'dividends',batch:true};
+ editor={batch:'dividends'};
  $('#editor').classList.add('dividend-batch-dialog');
  $('#editor-title').textContent='배당 추가';
  $('#editor-error').textContent='';
@@ -770,7 +808,11 @@ $('#editor-fields').addEventListener('click',e=>{
 $('#editor-form').addEventListener('submit',async e=>{
  e.preventDefault();const save=$('#editor-save');save.disabled=true;$('#editor-error').textContent='';
  try {
-  if (editor.batch) {
+  if (editor.batch==='holdings') {
+   await saveHoldingBatch(e.target);
+   return;
+  }
+  if (editor.batch==='dividends') {
    await saveDividendBatch(e.target);
    return;
   }
@@ -866,6 +908,9 @@ workspace.addEventListener('click',async e=>{
   else if(el.dataset.addBudgetChild){
    const parent=collections.budgets.find(row=>row.budget_id===el.dataset.addBudgetChild);
    if(parent) await openEditor('budgets',null,parent.flow_type,parent);
+  }
+  else if(el.dataset.action==='edit-holdings'){
+   if (!workspace.hasAttribute('aria-busy')) openHoldingBatch();
   }
   else if(el.dataset.action==='edit-asset-item'){
    const id=$('#asset-to-edit').value;

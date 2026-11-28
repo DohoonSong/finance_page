@@ -33,6 +33,7 @@
 | `/holdings?account_id=...`, `/holdings/{id}` | GET, POST / PATCH | 보유종목 스냅샷 |
 | `/portfolio-summary` | GET | 계좌별 최신 보유종목과 누적 투자 손익. 선택 파라미터 `account_id`, `investment_category` |
 | `/dividends?year=YYYY`, `/dividends/{id}` | GET, POST / PATCH | 배당 원장 |
+| `/holdings/batch` | PATCH | 여러 보유종목 스냅샷의 취득 원가와 평가액을 일괄 수정 |
 | `/dividends/batch` | POST | 공통 `payment_date`와 `items` 1~50건을 한 번에 등록 |
 | `/dividend-summary?year=YYYY` | GET | 월·통화별 총배당/세금/순배당. 선택 파라미터 `account_id`, `investment_category` |
 | `/realized-gains`, `/realized-gains/{id}` | GET, POST / PATCH | 실현 손익 |
@@ -59,5 +60,7 @@
 월별 예산은 기존 `category`를 1차 분류로 사용합니다. POST와 PATCH에는 선택 텍스트 필드 `category_2`, `category_3`을 전달할 수 있습니다. 3차 분류에는 2차 분류가 필요합니다. 월 복사는 하위 분류도 복사합니다.
 
 보유종목의 `portfolio_group`은 포트폴리오 묶음입니다. 토스는 기존 투자 분류를 읽고, 다른 계좌는 이름을 직접 입력할 수 있습니다. `/portfolio-summary`의 `investment_category` 필터에는 묶음 이름을 전달할 수 있습니다. 배당 목록은 지급일 내림차순이며, `/dividend-summary`에는 선택 파라미터 `month=YYYY-MM`과 `symbol`을 함께 전달할 수 있습니다.
+
+보유종목 금액 일괄 수정의 각 `items` 항목에는 `holding_id`, `expected_version`, `cost_basis`, `market_value`가 필요합니다. 유효하지 않거나 마감됐거나 버전이 달라진 스냅샷이 하나라도 있으면 요청 전체가 거부됩니다.
 
 배당 일괄 등록의 각 `items` 항목에는 `account_id`, `gross_amount`, 선택 필드 `dividend_group`을 전달합니다. 통화는 계좌에서 가져오며 세금은 0원, 종목은 비어 있는 상태로 저장합니다. 유효하지 않은 항목이 있으면 요청 전체가 거부됩니다.

@@ -9,7 +9,7 @@ from requests import RequestException
 from flask import Blueprint, current_app, g, jsonify, request
 from .actuals import download_latest, monthly_actuals, publish
 from .auth import login_required
-from .deployment import update_branch
+from .deployment import deployment_config
 from .schema import AppError
 from .services import (CATEGORY_TABLES, DIVIDEND_GROUPS, TOSS_CATEGORIES, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, date_value, dividend_summary, effective_closings, finalize, investment_rows, lease_budget, month_end, month_value, now, portfolio_summary, reopen, visible_settings, write_record)
 from .store import GoogleSheets, operation
@@ -175,7 +175,8 @@ def settings_version(rows):
 def settings():
     if request.method == 'GET':
         rows = visible_settings(repository().read())
-        return ok({'items': rows, 'version': settings_version(rows), 'writes_enabled': current_app.config['WRITES_ENABLED'], 'backend': current_app.config['DATA_BACKEND'], 'timezone': 'Asia/Seoul', 'base_currency': 'KRW', 'update_branch': update_branch()})
+        deployment = deployment_config()
+        return ok({'items': rows, 'version': settings_version(rows), 'writes_enabled': current_app.config['WRITES_ENABLED'], 'backend': current_app.config['DATA_BACKEND'], 'timezone': 'Asia/Seoul', 'base_currency': 'KRW', 'update_branch': deployment['branch'], 'update_missing': deployment['missing'], 'running_commit': current_app.extensions['deployment_runtime']['commit']})
     value = body(('expected_version', 'display_name'))
     name = value.get('display_name')
     if not isinstance(name, str) or not 1 <= len(name.strip()) <= 100:

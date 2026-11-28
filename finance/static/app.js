@@ -53,8 +53,24 @@ async function api(path, method='GET', data) {
  const result = await response.json();
  if (response.status < 500) pendingRequests.delete(signature);
  if (response.status === 401) { location.href='/login'; throw new Error('로그인이 필요합니다.'); }
- if (!response.ok) throw new Error(`${result.error?.message || '요청에 실패했습니다.'} (요청 ${result.request_id || rid})`);
+ if (!response.ok) throw Object.assign(new Error(`${result.error?.message || '요청에 실패했습니다.'} (요청 ${result.request_id || rid})`),{code:result.error?.code});
  return result.data;
+}
+async function verifyReload(requestId) {
+ for (let attempt=0;attempt<15;attempt++) {
+  if (attempt) await new Promise(resolve=>setTimeout(resolve,2000));
+  try {
+   const query=new URLSearchParams({request_id:requestId});
+   const response=await fetch('/api/v1/deployment-status?'+query,{cache:'no-store',signal:AbortSignal.timeout(3000)});
+   if (response.status===401) return null;
+   if (!response.ok) continue;
+   const {data}=await response.json();
+   if (data?.confirmed) return data.commit;
+  } catch (_) {
+   // The service can briefly be unavailable while PythonAnywhere reloads it.
+  }
+ }
+ return null;
 }
 function message(text, error=false) { const el=$('#message'); el.textContent=text; el.className=error?'error':''; el.hidden=false; }
 const button = (resource, text) => `<button data-add="${resource}" ${writable?'':'disabled'}>${esc(text || '+ '+titles[resource])}</button>`;
@@ -367,8 +383,11 @@ async function render(focusFilter=null) {
    html+=panel('ClevMoney 백업',
     `<p class="section-note">${actualsEnabled?'Drive에서 가장 최근에 수정된 백업의 실제 수입·지출을 가져옵니다.':'서버에 Drive 폴더를 설정하면 사용할 수 있습니다.'}</p>`,
     `<button data-action="import-backup" ${actualsEnabled && writable?'':'disabled'}>최신 백업 가져오기</button>`);
+   const running=s.running_commit?s.running_commit.slice(0,7):'확인 불가';
+   const deployHint=s.update_branch?`${s.update_branch} 브랜치의 최신 코드로 업데이트합니다.`
+    :`서버 .env에서 ${s.update_missing?.join(', ') || '업데이트 설정'}을 확인하세요.`;
    html+=panel('서버 업데이트',
-    `<p class="section-note">${s.update_branch?esc(s.update_branch)+' 브랜치의 최신 코드를 가져온 뒤 웹앱을 다시 시작합니다.':'PythonAnywhere에서 업데이트 설정을 활성화하면 사용할 수 있습니다.'}</p>`,
+    `<p class="section-note">실행 중인 커밋 <span id="running-commit">${esc(running)}</span> · ${esc(deployHint)}</p>`,
     `<button data-action="deploy-update" ${s.update_branch?'':'disabled'}>업데이트 및 Reload</button>`);
    html+=panel('분류 기준과 보안','<p class="section-note">예산 흐름: 수입 / 소비 / 투자 배분 / 계좌 이체 / 원금 상환<br>자산 분류: 현금 / 예금 / 부동산 / 기타<br>기준 통화: KRW · 표시 시간대: Asia/Seoul<br>비밀번호 변경: 서버에서 password-hash 명령으로 새 해시를 생성하고 환경 설정을 변경하세요.<br>재무 자료는 외부로 전송되는 차트 라이브러리 없이 이 화면에서 표시합니다.</p>');
   }
@@ -500,13 +519,27 @@ workspace.addEventListener('click',async e=>{
   }
   else if(el.dataset.action==='deploy-update'){
    if (!confirm(`${settings.update_branch}의 최신 코드로 업데이트하고 웹앱을 다시 시작할까요? 잠시 접속이 중단될 수 있습니다.`)) return;
+   const path='/deployment-update', payload={confirm:true};
+   const signature=JSON.stringify([path,'POST',payload]);
+   let requestId;
+   message('Git 업데이트와 Reload 요청을 진행 중입니다…');
    try {
-    const result=await api('/deployment-update','POST',{confirm:true});
-    message(`커밋 ${result.commit}의 Reload를 요청했습니다. 잠시 후 브라우저를 새로고침하세요.`);
+    const result=await api(path,'POST',payload);
+    requestId=result.request_id;
    } catch (err) {
-    message(err instanceof SyntaxError || err.message.startsWith('연결을 확인')
-     ? '웹앱이 응답하기 전에 다시 시작됐을 수 있습니다. 잠시 후 새로고침해 확인하세요.'
-     : err.message,true);
+    if (!(err instanceof SyntaxError || err.message.startsWith('연결을 확인') || err.code==='deploy_reload_unknown')) throw err;
+    requestId=pendingRequests.get(signature);
+   } finally {
+    pendingRequests.delete(signature);
+   }
+   message('새 Flask 프로세스가 응답하는지 확인 중입니다…');
+   const commit=requestId?await verifyReload(requestId):null;
+   if (commit) {
+    const short=commit.slice(0,7);
+    if ($('#running-commit')) $('#running-commit').textContent=short;
+    message(`Reload 완료 · 실행 중인 커밋 ${short}. 새 화면은 브라우저를 새로고침하면 반영됩니다.`);
+   } else {
+    message('Reload 완료를 확인하지 못했습니다. PythonAnywhere Web 탭과 실행 중인 커밋을 확인하세요.',true);
    }
   }
   else if(el.dataset.action==='display-name'){const name=prompt('표시 이름',settings.items.find(r=>r.key==='display_name')?.value || '나의 재무');if(name){await api('/settings','PATCH',{display_name:name,expected_version:settings.version});message('표시 이름을 저장했습니다.');await render();}}

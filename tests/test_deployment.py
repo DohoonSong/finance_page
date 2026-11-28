@@ -28,7 +28,17 @@ def test_deployment_reload_runs_after_git_and_keeps_token_private(app, client, s
     monkeypatch.setattr(deployment, 'fast_forward', actions.pull)
     monkeypatch.setattr(deployment.requests, 'post', actions.reload)
     result = send('/deployment-update', {'confirm': True, 'branch': 'ignored'})
-    assert result.json['data'] == {'commit': 'abc1234'}
+    attempt_id = result.json['data']['request_id']
+    assert result.json['data']['commit'] == 'abc1234'
+    status = '/api/v1/deployment-status'
+    assert app.test_client().get(status).status_code == 401
+    query = {'request_id': attempt_id}
+    assert client.get(status, query_string=query).json['data']['confirmed'] is False
+    app.extensions['deployment_runtime'] = {'commit': 'abc1234', 'started_at': 0}
+    assert client.get(status, query_string=query).json['data']['confirmed'] is False
+    app.extensions['deployment_runtime'] = {'commit': 'abc1234', 'started_at': 10**12}
+    assert client.get(status, query_string=query).json['data']['confirmed'] is True
+    assert client.get(status, query_string={'request_id': 'other'}).json['data']['confirmed'] is False
     assert [call[0] for call in actions.mock_calls] == ['pull', 'reload']
     actions.pull.assert_called_once_with('main')
     actions.reload.assert_called_once_with(
@@ -47,6 +57,11 @@ def test_deployment_reload_runs_after_git_and_keeps_token_private(app, client, s
     actions.reload.assert_not_called()
 
     actions.pull.side_effect = None
+    actions.reload.return_value = Mock(status_code=403)
+    rejection = send('/deployment-update', {'confirm': True})
+    assert rejection.json['error']['code'] == 'deploy_reload_failed'
+    assert 'HTTP 403' in rejection.json['error']['message']
+
     actions.reload.side_effect = requests.Timeout('private output')
     assert send('/deployment-update', {'confirm': True}).json['error']['code'] == 'deploy_reload_unknown'
 
@@ -67,5 +82,5 @@ def test_fast_forward_checks_current_branch_and_clean_tree(monkeypatch):
         ('fetch', '--no-tags', 'origin', 'refs/heads/main'),
         ('merge-base', '--is-ancestor', 'HEAD', 'FETCH_HEAD'),
         ('merge', '--ff-only', 'FETCH_HEAD'),
-        ('rev-parse', '--short', 'HEAD'),
+        ('rev-parse', 'HEAD'),
     ]

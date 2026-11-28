@@ -66,7 +66,8 @@ def create_app(config=None, backend=None):
     app.register_blueprint(auth_bp)
     app.register_blueprint(api_bp)
     app.register_blueprint(web_bp)
-    from .deployment import bp as deployment_bp
+    from .deployment import bp as deployment_bp, capture_runtime
+    app.extensions['deployment_runtime'] = capture_runtime()
     app.register_blueprint(deployment_bp)
 
     @app.errorhandler(AppError)

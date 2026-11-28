@@ -209,8 +209,10 @@ function budgetSecondLevel(visible,income,prefix) {
  }
  const sections=Array.from(groups.values(),(entries,index)=>{
   const first=entries[0], title=budgetSecond(first), branchId=prefix+'-branch-'+index;
-  const branches=entries.filter(row=>row.category_3);
-  const parents=entries.filter(row=>!row.category_3);
+  // Older grouped rows keep their individual names in item.
+  const hasGroupedItems=entries.some(row=>!row.category_3 && row.category_2 && row.item!==title);
+  const branches=hasGroupedItems?entries:entries.filter(row=>row.category_3);
+  const parents=hasGroupedItems?[]:entries.filter(row=>!row.category_3);
   const amount=entries.reduce((sum,row)=>sum+Number(row.amount),0);
   const share=value=>isBudgetOutflow(first)?percentage(incomeShare(value,income)):'—';
   const amountCells=value=>`${percentOnly()?'':`<td>${money(value)}</td>`}<td>${share(value)}</td>`;
@@ -223,7 +225,7 @@ function budgetSecondLevel(visible,income,prefix) {
    ${percentOnly()?'':`<td>${esc(parents.map(row=>row.note).filter(Boolean).join(' / ') || '—')}</td>
    <td>${parents.map(budgetRowActions).join('')}${add}</td>`}</tr></tbody>`;
   const children=branches.map(row=>`<tr class="budget-tree-child"><td></td>
-   <th scope="row"><span aria-hidden="true">↳ </span>${esc(row.category_3)}</th>
+   <th scope="row"><span aria-hidden="true">↳ </span>${esc(row.category_3 || row.item)}</th>
    <td>${esc(display(row,'flow_type'))}</td>${amountCells(row.amount)}
    ${percentOnly()?'':`<td>${esc(display(row,'note'))}</td><td>${budgetRowActions(row)}</td>`}</tr>`).join('');
   return parent+(branches.length?`<tbody id="${branchId}" hidden>${children}</tbody>`:'');

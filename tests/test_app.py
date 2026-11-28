@@ -374,13 +374,15 @@ def test_asset_balance_groups_use_month_end_cost_basis_and_deposit_balances(send
     }
 
 
-def test_dividend_years_and_monthly_group_totals(send, client):
-    a = account(send, kind='brokerage')
-    for date, group, amount in [
-        ('2025-11-01', '토스증권', 50),
-        ('2026-11-01', '토스증권', 100),
-        ('2026-11-02', 'ISA', 200),
-        ('2026-11-03', '', 300),
+def test_dividend_years_and_monthly_account_totals(send, client):
+    toss = add(send, 'accounts', name='토스증권', type='brokerage', currency='KRW')
+    isa = add(send, 'accounts', name='중개형 ISA', institution='토스증권', type='brokerage', currency='KRW')
+    other = account(send, kind='brokerage')
+    for date, a, group, amount in [
+        ('2025-11-01', toss, '', 50),
+        ('2026-11-01', toss, 'ISA', 100),
+        ('2026-11-02', isa, '', 200),
+        ('2026-11-03', other, '토스증권', 300),
     ]:
         add(send, 'dividends', payment_date=date, account_id=a['account_id'], symbol='AAA',
             gross_amount=amount, tax_amount=0, net_amount=amount, currency='KRW', dividend_group=group)

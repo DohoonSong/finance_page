@@ -110,16 +110,19 @@
  gap: .75rem;
 }
 .actual-expense-line strong { flex-shrink: 0; }
-.actual-expense-group > h4 {
+.actual-expense-group > summary {
  margin: 0;
  padding: .65rem .75rem;
  background: var(--soft);
+ cursor: pointer;
+ font-weight: 600;
 }
 .actual-expense-detail { border-top: 1px solid var(--line); }
 .actual-expense-detail > summary {
  cursor: pointer;
  padding: .65rem .75rem;
 }
+.actual-expense-group > summary .actual-expense-line,
 .actual-expense-detail > summary .actual-expense-line {
  display: inline-flex;
  width: calc(100% - 1.2rem);
@@ -130,3 +133,11 @@
 
 .spending-review { margin-top: 1rem; }
 .spending-review > summary { cursor: pointer; font-weight: 600; margin-bottom: .65rem; }
+
+.table-pagination {
+ display: flex;
+ align-items: center;
+ justify-content: flex-end;
+ gap: .75rem;
+ margin-top: .75rem;
+}

@@ -83,6 +83,10 @@ def is_toss(account):
                for field in ('name', 'institution'))
 
 
+def is_isa(account):
+    return bool(re.search(r'(?<![A-Z])ISA(?![A-Z])', str(account['name']).upper()))
+
+
 def category_key(table, identifier):
     return f'{CATEGORY_PREFIX}{table}/{identifier}'
 
@@ -222,7 +226,7 @@ def asset_balance_groups(data, cutoff):
     for row in latest(data['holdings'], ('account_id', 'symbol'), cutoff):
         account = accounts[row['account_id']]
         name = str(account['name'])
-        if re.search(r'(?<![A-Z])ISA(?![A-Z])', name.upper()):
+        if is_isa(account):
             name = 'ISA'
         elif account['type'] == 'retirement' or '연금저축' in re.sub(r'\s+', '', name) or 'IRP' in name.upper():
             name = '연금저축'
@@ -256,8 +260,13 @@ def asset_balance_groups(data, cutoff):
 def dividend_summary(data, year, *, account_id=None, category=None, month=None, symbol=None, dividend_group=None):
     groups = defaultdict(lambda: {'gross_amount': 0, 'tax_amount': 0, 'net_amount': 0,
                                   'toss_gross_amount': 0, 'isa_gross_amount': 0})
-    group_fields = {'토스증권': 'toss_gross_amount', 'ISA': 'isa_gross_amount'}
-    rows = investment_rows(data, 'dividends')
+    account_fields = {}
+    for account in data['accounts']:
+        if is_isa(account):
+            account_fields[account['account_id']] = 'isa_gross_amount'
+        elif is_toss(account):
+            account_fields[account['account_id']] = 'toss_gross_amount'
+    rows = investment_rows(data, 'dividends') if category or dividend_group else data['dividends']
     for r in rows:
         if (r['payment_date'][:4] == year
                 and (not month or r['payment_date'][:7] == month)
@@ -267,7 +276,7 @@ def dividend_summary(data, year, *, account_id=None, category=None, month=None, 
             p = groups[(r['payment_date'][:7], r['currency'])]
             for key in ('gross_amount', 'tax_amount', 'net_amount'):
                 p[key] += int(r[key])
-            group_field = group_fields.get(r['dividend_group'])
+            group_field = account_fields.get(r['account_id'])
             if group_field:
                 p[group_field] += int(r['gross_amount'])
     return [{'month': month, 'currency': currency, **v} for (month, currency), v in sorted(groups.items())]

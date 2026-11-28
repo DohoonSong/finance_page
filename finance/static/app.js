@@ -599,9 +599,9 @@ async function render(focusFilter=null) {
    html=panel('월마감',`<p class="section-note">${esc(month)}월의 잔액과 예산을 검토하고 확정합니다. 마감한 기간은 잠기며 재개할 때 새 리비전을 생성합니다.</p><div id="close-preview"></div>`,`<button data-action="preview" ${writable?'':'disabled'}>마감 미리보기</button><button data-action="reopen" ${writable?'':'disabled'}>선택 월 재개</button>`);
    html+=panel('순자산 추이',chart(history))+panel('리비전 이력',table(rows,['month','revision','status','net_worth','budget_balance','closed_at']));
   } else if(page==='settings') {
-   const [rows,s]=await Promise.all([getCollection('accounts'),api('/settings')]);settings=s;
-   html=panel('계좌 관리',table(rows,['name','type','institution','currency','active'],'accounts'),button('accounts'));
-   html+=panel('데이터와 표시 설정',table(s.items,['key','value','description']),`<button data-action="display-name" ${writable?'':'disabled'}>표시 이름</button><a href="/api/v1/backup">JSON 백업 내려받기 ↗</a>`);
+   const s=await api('/settings');
+   settings=s;
+   html=panel('데이터와 표시 설정',table(s.items,['key','value','description']),`<button data-action="display-name" ${writable?'':'disabled'}>표시 이름</button><a href="/api/v1/backup">JSON 백업 내려받기 ↗</a>`);
    html+=panel('ClevMoney 백업',
     `<p class="section-note">${actualsEnabled?'Drive에서 가장 최근에 수정된 백업의 실제 수입·지출을 가져옵니다.':'서버에 Drive 폴더를 설정하면 사용할 수 있습니다.'}</p>`,
     `<button data-action="import-backup" ${actualsEnabled && writable?'':'disabled'}>최신 백업 가져오기</button>`);

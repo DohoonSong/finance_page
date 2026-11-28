@@ -668,31 +668,59 @@ async function render(focusFilter=null) {
 function openAmountBatch(resource,rows,title) {
  const dividends=resource==='dividends';
  const amounts=dividends?['gross_amount','tax_amount']:['cost_basis','market_value'];
+ const inputs=dividends?amounts:['cost_basis','unrealized_profit'];
  editor={batch:'amounts',resource,rows,amounts};
  $('#editor').classList.remove('dividend-batch-dialog');
  $('#editor').classList.add('amount-batch-dialog');
  $('#editor-title').textContent=title;
  $('#editor-error').textContent='';
  $('#editor-fields').innerHTML=`<div class="amount-batch-fields">
-  <p class="caption">현재 필터에 해당하는 ${rows.length}건입니다. ${dividends?'순배당은 총배당에서 세금을 빼서 계산합니다.':'기준일을 확인하고 바꿀 금액을 입력하세요.'}</p>
+  <p class="caption">현재 필터에 해당하는 ${rows.length}건입니다. ${dividends?'순배당은 총배당에서 세금을 빼서 계산합니다.':'평가액은 취득 원가에 손익을 더해 계산합니다. Tab은 취득 원가를 모두 지난 뒤 손익으로 이동합니다.'}</p>
   ${rows.map((row,index)=>`<fieldset class="amount-batch-row" data-amount-index="${index}">
    <legend>${esc(dividends?(row.symbol || row.dividend_group || '배당'):`${row.name} (${row.symbol})`)}</legend>
    <p class="caption">${dividends?'':esc(row.date)+' · '}${esc(accountById(row.account_id)?.name || row.account_id)} · ${esc(row.currency)}</p>
    ${dividends?`<label class="amount-batch-date">지급일<input name="payment_date" type="date"
     value="${esc(row.payment_date)}" required></label>`:''}
-   ${amounts.map(key=>`<label>${labels[key]}<input name="${key}" type="number"
-    min="0" max="9000000000000" step="1" value="${esc(row[key])}" required></label>`).join('')}
+   ${inputs.map(key=>`<label>${key==='unrealized_profit'?'손익':labels[key]}<input name="${key}" type="number"
+    min="${key==='unrealized_profit'?-9000000000000:0}" max="9000000000000" step="1"
+    value="${esc(key==='unrealized_profit'?Number(row.market_value)-Number(row.cost_basis):row[key])}" required></label>`).join('')}
+   ${dividends?'':`<p class="holding-batch-value">평가액 <output>${esc(money(row.market_value,row.currency))}</output></p>`}
   </fieldset>`).join('')}
  </div>`;
  $('#editor').showModal();
 }
+function holdingMarketValue(fields) {
+ return $('[name="cost_basis"]',fields).valueAsNumber + $('[name="unrealized_profit"]',fields).valueAsNumber;
+}
+$('#editor-fields').addEventListener('input',e=>{
+ if (editor?.resource!=='holdings' || editor.batch!=='amounts') return;
+ const fields=e.target.closest('[data-amount-index]');
+ if (!fields) return;
+ const value=holdingMarketValue(fields);
+ const profit=$('[name="unrealized_profit"]',fields);
+ profit.setCustomValidity(Number.isFinite(value) && (value<0 || value>9_000_000_000_000)
+  ?'계산된 평가액은 0 이상 9조 이하여야 합니다.':'');
+ const row=editor.rows[Number(fields.dataset.amountIndex)];
+ $('output',fields).value=Number.isFinite(value)?money(value,row.currency):'—';
+});
+$('#editor-fields').addEventListener('keydown',e=>{
+ if (e.key!=='Tab' || editor?.resource!=='holdings' || editor.batch!=='amounts') return;
+ const inputs=['cost_basis','unrealized_profit'].flatMap(name=>[...e.currentTarget.querySelectorAll(`[name="${name}"]`)]);
+ const index=inputs.indexOf(e.target);
+ const next=inputs[index+(e.shiftKey?-1:1)];
+ if (index===-1 || !next) return;
+ e.preventDefault();
+ next.focus();
+});
 async function saveAmountBatch(form) {
  const {resource,rows,amounts}=editor;
  const idKey=idKeys[resource];
  const items=[];
  for (const fields of form.querySelectorAll('[data-amount-index]')) {
   const row=rows[Number(fields.dataset.amountIndex)];
-  const values=Object.fromEntries(amounts.map(key=>[key,$(`[name="${key}"]`,fields).valueAsNumber]));
+  const values=resource==='holdings'
+   ?{cost_basis:$('[name="cost_basis"]',fields).valueAsNumber,market_value:holdingMarketValue(fields)}
+   :Object.fromEntries(amounts.map(key=>[key,$(`[name="${key}"]`,fields).valueAsNumber]));
   const date=$('[name="payment_date"]',fields);
   if (date && date.value!==row.payment_date) values.payment_date=date.value;
   if ('payment_date' in values || amounts.some(key=>values[key]!==Number(row[key]))) {

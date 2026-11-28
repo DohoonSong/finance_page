@@ -41,6 +41,8 @@ const titles = {'accounts':'계좌','asset-items':'자산 항목','budgets':'예
 const idKeys = {'accounts':'account_id','asset-items':'asset_id','budgets':'budget_id','recurring-items':'recurring_id','asset-snapshots':'snapshot_id','liabilities':'loan_id','liability-snapshots':'snapshot_id','holdings':'holding_id','dividends':'dividend_id','realized-gains':'gain_id'};
 let budgetView = null;
 let actualView = null;
+let dividendVisible = [];
+const dividendAccountFilters = new Map();
 const actualFilters = {category:null, subcategory:null};
 let collections = {}, editor = null, closingPreview = null, settings = null, loadSequence = 0;
 const pendingRequests = new Map();
@@ -134,15 +136,11 @@ function holdingFilterButtons(key, label, options, allLabel) {
    aria-pressed="${filters[key]===value}">${esc(name)}</button>`).join('')}
  </div>`;
 }
-function investmentFilters(accounts, holdings=[]) {
+function investmentFilters(accounts, holdings) {
  const eligible=accounts.filter(investmentAccount);
  if (!eligible.some(account=>account.account_id===filters.account)) filters.account='';
  const toss=tossAccount(eligible.find(account=>account.account_id===filters.account));
  const choices=eligible.map(a=>[a.account_id,a.name]);
- if (page==='dividends') {
-  if (!toss) filters.category='';
-  return filterSelect('account','계좌',choices,'전체 계좌')+(toss?filterSelect('category','투자 분류',tossCategories.map(c=>[c,c]),'전체 분류'):'');
- }
  const owned=holdings.filter(row=>row.account_id===filters.account);
  const groups=toss?tossCategories:uniqueOptions(owned,'portfolio_group');
  if (!groups.includes(filters.category)) filters.category='';
@@ -267,6 +265,30 @@ function budgetSecondLevel(visible,income,prefix) {
  const headers=percentOnly()?['1차 분류','2차 항목','흐름','수입 대비']:['1차 분류','2차 항목','흐름','금액','수입 대비','메모','관리'];
  return `<div class="table-wrap"><table><thead><tr>${headers.map(label=>
   `<th scope="col">${label}</th>`).join('')}</tr></thead>${sections}</table></div>`;
+}
+function dividendAccountTable(rows, category) {
+ const visible=category?rows.filter(row=>row.investment_category===category):rows;
+ return table(visible,['payment_date','dividend_group','symbol','investment_category','gross_amount','tax_amount','net_amount','currency'],'dividends');
+}
+function dividendAccountSections(rows) {
+ const groups=new Map();
+ for (const row of rows) {
+  if (!groups.has(row.account_id)) groups.set(row.account_id,[]);
+  groups.get(row.account_id).push(row);
+ }
+ if (!groups.size) return empty('표시할 배당 내역이 없습니다.');
+ return Array.from(groups,([id,entries])=>{
+  const account=accountById(id);
+  const category=dividendAccountFilters.get(id) || '';
+  const picker=tossAccount(account)?`<div class="record-filters"><label>투자 분류
+   <select data-dividend-account-filter aria-label="${esc(account.name)} 투자 분류">
+    ${selectOptions(tossCategories.map(value=>[value,value]),category,'전체 분류')}
+   </select></label></div>`:'';
+  return `<section class="dividend-account" data-dividend-account="${esc(id)}">
+   <h3>${esc(account?.name || id)}</h3>${picker}
+   <div class="dividend-account-table">${dividendAccountTable(entries,category)}</div>
+  </section>`;
+ }).join('');
 }
 function actualFilter(key, label, rows) {
  const options=[...new Set(rows.map(row=>row[key] || ''))].sort((a,b)=>a.localeCompare(b,'ko'));
@@ -413,25 +435,26 @@ async function render(focusFilter=null) {
    html+=panel('보유종목 스냅샷',holdingFilters+table(visible.map(row=>({...row,holding_name:row.name})),['date','account_id','portfolio_group','holding_name','symbol','cost_basis','market_value','currency'],'holdings'),button('holdings'),'청산 시 보유 원가와 평가액을 0으로 기록하세요. 계좌 현금은 CASH 종목으로 관리합니다.');
    html+=panel('실현 손익',table(filteredInvestments(gains),['trade_date','account_id','symbol','investment_category','profit','currency'],'realized-gains'),button('realized-gains'));
   } else if(page==='dividends') {
-   const [accounts, rows]=await Promise.all([getCollection('accounts'),getCollection('dividends','?year='+year)]);
+   const [,rows]=await Promise.all([getCollection('accounts'),getCollection('dividends','?year='+year)]);
    if (sequence!==loadSequence) return;
-   const accountFilters=investmentFilters(accounts);
-   const scoped=filteredInvestments(rows).filter(row=>!filters.dividendGroup || row.dividend_group===filters.dividendGroup);
+   const scoped=rows.filter(row=>!filters.dividendGroup || row.dividend_group===filters.dividendGroup);
    const symbols=uniqueOptions(scoped,'symbol');
    const months=[...new Set(scoped.map(row=>row.payment_date.slice(0,7)))].sort().reverse();
    if (!symbols.includes(filters.dividendSymbol)) filters.dividendSymbol='';
    if (!months.includes(filters.dividendMonth)) filters.dividendMonth='';
-   html=`<div class="record-filters">${accountFilters}
+   html=`<div class="record-filters">
     ${filterSelect('dividendGroup','배당 구분',dividendGroups.map(value=>[value,value]),'전체 구분')}
     ${filterSelect('dividendSymbol','종목',symbols.map(value=>[value,value]),'전체 종목')}
     ${filterSelect('dividendMonth','지급 월',months.map(value=>[value,value]),'전체 월')}</div>`;
    const visible=scoped.filter(row=>(!filters.dividendSymbol || row.symbol===filters.dividendSymbol)
     && (!filters.dividendMonth || row.payment_date.startsWith(filters.dividendMonth)));
-   const summary=await api('/dividend-summary?'+investmentQuery({
+   const summary=await api('/dividend-summary?'+new URLSearchParams({
     year,month:filters.dividendMonth,symbol:filters.dividendSymbol,dividend_group:filters.dividendGroup,
    }));
+   if (sequence!==loadSequence) return;
+   dividendVisible=visible;
    html+=panel(year+'년 월별 배당',table(summary,['month','currency','gross_amount','tax_amount','net_amount']),'','배당은 순자산에 별도 가산하지 않습니다. 현금 잔액에서 한 번 반영하세요.');
-   html+=panel('배당 내역',table(visible,['payment_date','account_id','dividend_group','symbol','investment_category','gross_amount','tax_amount','net_amount','currency'],'dividends'),button('dividends'));
+   html+=panel('배당 내역',dividendAccountSections(visible),button('dividends'));
   } else if(page==='history') {
    const [rows, history]=await Promise.all([api('/closings'),api('/net-worth/history')]);
    collections.closings=rows;
@@ -636,6 +659,14 @@ workspace.addEventListener('change',e=>{
   const details=$('#actual-details');
   details.innerHTML=actualDetails(actualView.actuals);
   $(`[data-actual-filter="${actualKey}"]`,details)?.focus();
+  return;
+ }
+ if ('dividendAccountFilter' in e.target.dataset) {
+  const section=e.target.closest('[data-dividend-account]');
+  const id=section.dataset.dividendAccount;
+  const category=e.target.value;
+  dividendAccountFilters.set(id,category);
+  $('.dividend-account-table',section).innerHTML=dividendAccountTable(dividendVisible.filter(row=>row.account_id===id),category);
   return;
  }
  const key=e.target.dataset.filter;

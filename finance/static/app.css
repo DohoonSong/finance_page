@@ -125,3 +125,5 @@
  width: calc(100% - 1.2rem);
  vertical-align: top;
 }
+
+.dividend-account + .dividend-account { margin-top: 1.5rem; }

@@ -94,3 +94,5 @@
 .asset-records { margin-top: 1rem; }
 .asset-records > summary { cursor: pointer; font-weight: 600; }
 .asset-records[open] > summary { margin-bottom: .75rem; }
+
+.actual-table + .actual-table { margin-top: 1.25rem; }

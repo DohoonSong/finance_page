@@ -276,17 +276,32 @@ function actualDetails(actuals) {
    income_share:row.flow_type==='transfer'?null:incomeShare(row.amount,actuals.totals.income),
   }));
  const fields=percentOnly()
-  ?['date','flow_type','category','subcategory','income_share']
-  :['date','flow_type','category','subcategory','item','amount','payment_method','note'];
- const content=rows.length?table(rows,fields):empty('표시할 실제 거래가 없습니다.');
- return `<div class="record-filters">${category}${subcategory}</div>${content}`;
+  ?['date','category','subcategory','income_share']
+  :['date','category','subcategory','item','amount','payment_method','note'];
+ const tables=[['income','실제 수입'],['expense','실제 소비'],['transfer','계좌 이체']]
+  .map(([flow,label])=>{
+   const matching=rows.filter(row=>row.flow_type===flow);
+   if (flow==='transfer' && !matching.length) return '';
+   const content=matching.length?table(matching,fields):'<p class="caption">표시할 거래가 없습니다.</p>';
+   return `<section class="actual-table"><h3>${label}</h3>${content}</section>`;
+  }).join('');
+ return `<div class="record-filters">${category}${subcategory}</div>${tables}`;
 }
 function budgetPage({rows, recurring, summary, actuals, actualError}) {
  const masked=percentOnly(), income=summary.income;
  const incomeRows=rows.filter(row=>row.flow_type==='income')
   .map(row=>({...row,income_share:incomeShare(row.amount,income)}));
  const expenseTotals=budgetCategoryTotals(rows.filter(isBudgetOutflow),income);
- let html=`<div class="cards">${card('수입',budgetValue(income,income),'월 예산')}${card('소비',budgetValue(summary.expense,income),'투자 및 원금 상환 제외')}${card('투자 배분',budgetValue(summary.investment,income),'자산으로 이동하는 금액')}${card('예산 잔액',budgetValue(summary.budget_balance,income),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
+ let html='';
+ if (actuals) {
+  const actualIncome=actuals.totals.income;
+  html+=panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals)}</div>`,'',
+   actuals.filename?`실제 수입 ${budgetValue(actualIncome,actualIncome)} · 실제 소비 ${budgetValue(actuals.totals.expense,actualIncome)}${masked?'':' · 백업 '+actuals.filename}`
+    :'설정에서 최신 ClevMoney 백업을 가져올 수 있습니다.');
+ } else if (actualError) {
+  html+=panel('실제 수입·지출',`<p class="error">${esc(masked?'실제 수입·지출을 불러오지 못했습니다.':actualError)}</p>`);
+ }
+ html+=`<div class="cards">${card('수입',budgetValue(income,income),'월 예산')}${card('소비',budgetValue(summary.expense,income),'투자 및 원금 상환 제외')}${card('투자 배분',budgetValue(summary.investment,income),'자산으로 이동하는 금액')}${card('예산 잔액',budgetValue(summary.budget_balance,income),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
  html+=panel('수입 항목',table(incomeRows,masked?['category','item','income_share']:['category','item','amount','note'],masked?null:'budgets'),
   masked?'':`<button data-add="budgets" data-flow-type="income" ${writable?'':'disabled'}>+ 수입</button>`,
   `수입 합계 ${budgetValue(income,income)}${!masked && income>0?' · 100%':''}`);
@@ -295,14 +310,6 @@ function budgetPage({rows, recurring, summary, actuals, actualError}) {
  html+=panel('상세 예산 항목',`<div id="budget-filters">${budgetFilterButtons(rows)}</div><div id="budget-details">${budgetDetailTable(rows,income)}</div>`,
   masked?'':`<button data-action="copy" ${writable?'':'disabled'}>다른 월에서 복사</button>${button('budgets')}`,
   masked?'':'2차 금액은 직접 입력한 금액과 3차 항목의 합계입니다. 기존 금액을 나눌 때는 2차 금액도 함께 조정하세요.');
- if (actuals) {
-  const actualIncome=actuals.totals.income;
-  html+=panel('실제 수입·지출',`<div id="actual-details">${actualDetails(actuals)}</div>`,'',
-   actuals.filename?`실제 수입 ${budgetValue(actualIncome,actualIncome)} · 실제 지출 ${budgetValue(actuals.totals.expense,actualIncome)}${masked?'':' · 백업 '+actuals.filename}`
-    :'설정에서 최신 ClevMoney 백업을 가져올 수 있습니다.');
- } else if (actualError) {
-  html+=panel('실제 수입·지출',`<p class="error">${esc(masked?'실제 수입·지출을 불러오지 못했습니다.':actualError)}</p>`);
- }
  const repeatRows=masked?recurring.map(row=>({...row,income_share:row.flow_type==='transfer'?null:incomeShare(row.amount,income)})):recurring;
  html+=panel('반복 예산 템플릿',table(repeatRows,['item','flow_type','day',masked?'income_share':'amount','start_month','end_month','active'],masked?null:'recurring-items'),
   masked?'':button('recurring-items'),masked?'선택 월의 예산 수입을 기준으로 표시합니다. 월 예산에는 자동으로 더하지 않습니다.':'반복 항목은 템플릿으로 저장됩니다. 월 예산에는 자동으로 더하지 않습니다.');

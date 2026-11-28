@@ -9,6 +9,7 @@ const writable = document.body.dataset.writes === 'true';
 if (['investments','settings'].includes(page)) $('.month-picker').hidden=true;
 const csrf = $('meta[name="csrf-token"]').content;
 const monthInput = $('#month');
+const percentToggle = $('#percent-only');
 monthInput.value = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul',year:'numeric',month:'2-digit'}).format(new Date());
 const today = () => new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul'}).format(new Date());
 const money = (n, c='KRW') => `${Number(n || 0).toLocaleString('ko-KR')} ${c === 'KRW' ? '원' : c}`;
@@ -37,6 +38,7 @@ const schemas = {
 };
 const titles = {'accounts':'계좌','asset-items':'자산 항목','budgets':'예산','recurring-items':'반복 예산','asset-snapshots':'자산 잔액','liabilities':'대출','liability-snapshots':'대출 잔액','holdings':'보유종목','dividends':'배당','realized-gains':'실현 손익'};
 const idKeys = {'accounts':'account_id','asset-items':'asset_id','budgets':'budget_id','recurring-items':'recurring_id','asset-snapshots':'snapshot_id','liabilities':'loan_id','liability-snapshots':'snapshot_id','holdings':'holding_id','dividends':'dividend_id','realized-gains':'gain_id'};
+let budgetView = null;
 let collections = {}, editor = null, closingPreview = null, settings = null, loadSequence = 0;
 const pendingRequests = new Map();
 async function api(path, method='GET', data) {
@@ -58,7 +60,7 @@ const empty = (text='아직 기록이 없습니다. 첫 항목을 추가해 시�
 function panel(title, content, actions='', description='') { return `<section class="panel"><div class="panel-head"><div><h2>${esc(title)}</h2>${description?`<p class="caption">${esc(description)}</p>`:''}</div><div class="actions">${actions}</div></div>${content}</section>`; }
 function card(title, value, hint, highlight=false) { return `<article class="card ${highlight?'highlight':''}"><p class="card-label">${esc(title)}</p><div class="metric">${esc(value)}</div><span class="caption">${esc(hint)}</span></article>`; }
 function display(row,key) {
- if (key==='income_share') return row[key] == null ? '—' : incomeShareFormat.format(row[key]);
+ if (key==='income_share') return percentage(row[key]);
  if (key==='annual_rate') return row[key] == null || row[key]==='' ? '—' : annualRateFormat.format(row[key]);
  if (moneyKeys.has(key)) return money(row[key],row.currency || 'KRW');
  if (key==='closed_at') return row[key] ? new Date(row[key]).toLocaleString('ko-KR',{timeZone:'Asia/Seoul'}) : '—';
@@ -137,6 +139,9 @@ function budgetCategoryTotals(rows) {
 }
 const isBudgetOutflow = row => ['expense','investment','debt_principal'].includes(row.flow_type);
 const incomeShare = (amount,income) => income>0?Number(amount)/income:null;
+const percentage = ratio => ratio==null?'—':incomeShareFormat.format(ratio);
+const percentOnly = () => percentToggle?.checked === true;
+const budgetValue = (amount,income) => percentOnly()?percentage(incomeShare(amount,income)):money(amount);
 const budgetLevels=['category','category_2'];
 const budgetSecond = row => row.category_2 || row.item;
 const budgetLevel = (row,level) => level===0?(row.category || ''):budgetSecond(row);
@@ -177,24 +182,66 @@ function budgetDetailTable(rows, income) {
   const branches=entries.filter(row=>row.category_3);
   const parents=entries.filter(row=>!row.category_3);
   const amount=entries.reduce((sum,row)=>sum+Number(row.amount),0);
-  const share=value=>isBudgetOutflow(first)?display({income_share:incomeShare(value,income)},'income_share'):'—';
+  const share=value=>isBudgetOutflow(first)?percentage(incomeShare(value,income)):'—';
+  const amountCells=value=>`${percentOnly()?'':`<td>${money(value)}</td>`}<td>${share(value)}</td>`;
   const titleCell=branches.length
    ?`<button type="button" class="budget-tree-toggle" aria-expanded="false" aria-controls="${branchId}" data-budget-toggle><span aria-hidden="true"></span>${esc(title)}</button>`
    :`<span class="budget-tree-leaf">${esc(title)}</span>`;
   const add=`<button data-add-budget-child="${esc(first.budget_id)}" ${writable?'':'disabled'}>+ 3차</button>`;
   const parent=`<tbody><tr><td>${esc(display(first,'category'))}</td><th scope="row">${titleCell}</th>
-   <td>${esc(display(first,'flow_type'))}</td><td>${money(amount)}</td><td>${share(amount)}</td>
-   <td>${esc(parents.map(row=>row.note).filter(Boolean).join(' / ') || '—')}</td>
-   <td>${parents.map(budgetRowActions).join('')}${add}</td></tr></tbody>`;
+   <td>${esc(display(first,'flow_type'))}</td>${amountCells(amount)}
+   ${percentOnly()?'':`<td>${esc(parents.map(row=>row.note).filter(Boolean).join(' / ') || '—')}</td>
+   <td>${parents.map(budgetRowActions).join('')}${add}</td>`}</tr></tbody>`;
   const children=branches.map(row=>`<tr class="budget-tree-child"><td></td>
    <th scope="row"><span aria-hidden="true">↳ </span>${esc(row.category_3)}</th>
-   <td>${esc(display(row,'flow_type'))}</td><td>${money(row.amount)}</td><td>${share(row.amount)}</td>
-   <td>${esc(display(row,'note'))}</td><td>${budgetRowActions(row)}</td></tr>`).join('');
+   <td>${esc(display(row,'flow_type'))}</td>${amountCells(row.amount)}
+   ${percentOnly()?'':`<td>${esc(display(row,'note'))}</td><td>${budgetRowActions(row)}</td>`}</tr>`).join('');
   return parent+(branches.length?`<tbody id="${branchId}" hidden>${children}</tbody>`:'');
  }).join('');
- return `<div class="table-wrap"><table><thead><tr>${['1차 분류','2차 항목','흐름','금액','수입 대비','메모','관리'].map(label=>
+ const headers=percentOnly()?['1차 분류','2차 항목','흐름','수입 대비']:['1차 분류','2차 항목','흐름','금액','수입 대비','메모','관리'];
+ return `<div class="table-wrap"><table><thead><tr>${headers.map(label=>
   `<th scope="col">${label}</th>`).join('')}</tr></thead>${sections}</table></div>`;
 }
+function budgetPage({rows, recurring, summary, actuals, actualError}) {
+ const masked=percentOnly(), income=summary.income;
+ const incomeRows=rows.filter(row=>row.flow_type==='income')
+  .map(row=>({...row,income_share:incomeShare(row.amount,income)}));
+ const expenseTotals=budgetCategoryTotals(rows.filter(isBudgetOutflow)).map(([category,amount])=>({
+  category:category || '미분류',amount,income_share:incomeShare(amount,income),
+ }));
+ let html=`<div class="cards">${card('수입',budgetValue(income,income),'월 예산')}${card('소비',budgetValue(summary.expense,income),'투자 및 원금 상환 제외')}${card('투자 배분',budgetValue(summary.investment,income),'자산으로 이동하는 금액')}${card('예산 잔액',budgetValue(summary.budget_balance,income),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
+ html+=panel('수입 항목',table(incomeRows,masked?['category','item','income_share']:['category','item','amount','note'],masked?null:'budgets'),
+  masked?'':`<button data-add="budgets" data-flow-type="income" ${writable?'':'disabled'}>+ 수입</button>`,
+  `수입 합계 ${budgetValue(income,income)}${!masked && income>0?' · 100%':''}`);
+ html+=panel('월별 예산 항목',table(expenseTotals,masked?['category','income_share']:['category','amount','income_share']),'',
+  '소비·투자 배분·원금 상환의 수입 대비 비중입니다. 계좌 이체는 상세에서 확인할 수 있습니다.');
+ html+=panel('상세 예산 항목',`<div id="budget-filters">${budgetFilterButtons(rows)}</div><div id="budget-details">${budgetDetailTable(rows,income)}</div>`,
+  masked?'':`<button data-action="copy" ${writable?'':'disabled'}>다른 월에서 복사</button>${button('budgets')}`,
+  masked?'':'2차 금액은 직접 입력한 금액과 3차 항목의 합계입니다. 기존 금액을 나눌 때는 2차 금액도 함께 조정하세요.');
+ if (actuals) {
+  const actualIncome=actuals.totals.income;
+  const actualRows=actuals.items.map(row=>({...row,
+   date:row.date.endsWith('-50')?row.date.slice(0,7)+' (일자 미확정)':row.date,
+   item:row.description,note:row.memo,
+   income_share:row.flow_type==='transfer'?null:incomeShare(row.amount,actualIncome),
+  }));
+  html+=panel('실제 수입·지출',table(actualRows,masked
+   ?['date','flow_type','category','subcategory','income_share']
+   :['date','flow_type','category','subcategory','item','amount','payment_method','note']),'',
+   actuals.filename?`실제 수입 ${budgetValue(actualIncome,actualIncome)} · 실제 지출 ${budgetValue(actuals.totals.expense,actualIncome)}${masked?'':' · 백업 '+actuals.filename}`
+    :'설정에서 최신 ClevMoney 백업을 가져올 수 있습니다.');
+ } else if (actualError) {
+  html+=panel('실제 수입·지출',`<p class="error">${esc(masked?'실제 수입·지출을 불러오지 못했습니다.':actualError)}</p>`);
+ }
+ const repeatRows=masked?recurring.map(row=>({...row,income_share:row.flow_type==='transfer'?null:incomeShare(row.amount,income)})):recurring;
+ html+=panel('반복 예산 템플릿',table(repeatRows,['item','flow_type','day',masked?'income_share':'amount','start_month','end_month','active'],masked?null:'recurring-items'),
+  masked?'':button('recurring-items'),masked?'선택 월의 예산 수입을 기준으로 표시합니다. 월 예산에는 자동으로 더하지 않습니다.':'반복 항목은 템플릿으로 저장됩니다. 월 예산에는 자동으로 더하지 않습니다.');
+ return html;
+}
+percentToggle?.addEventListener('change',()=>{
+ if (budgetView) workspace.innerHTML=budgetPage(budgetView);
+ $('#message').hidden=true;
+});
 async function render(focusFilter=null) {
  const sequence=++loadSequence;
  $('#loading').hidden=false;
@@ -212,34 +259,12 @@ async function render(focusFilter=null) {
    if(foreign.length) html+=panel('외화 자산',table(foreign.map(([currency,v])=>({currency,...v})),['currency','assets_total','net_worth']),'','KRW 총액에 합산하지 않습니다.');
    html+=panel('투자 현황',table(d.portfolio,['name','currency','market_value','total_profit']),'<a href="/investments">투자 관리 ↗</a>');
   } else if(page==='budgets') {
-   const [rows, recurring, summary]=await Promise.all([
+   const [rows, recurring, summary, actual]=await Promise.all([
     getCollection('budgets','?month='+month),getCollection('recurring-items'),api('/budget-summary?month='+month),
+    actualsEnabled?api('/actual-transactions?month='+month).then(actuals=>({actuals}),err=>({actualError:err.message})):null,
    ]);
    if (sequence!==loadSequence) return;
-   const incomeRows=rows.filter(row=>row.flow_type==='income');
-   const expenseTotals=budgetCategoryTotals(rows.filter(isBudgetOutflow)).map(([category,amount])=>({
-    category:category || '미분류',amount,income_share:incomeShare(amount,summary.income),
-   }));
-   html=`<div class="cards">${card('수입',money(summary.income),'월 예산')}${card('소비',money(summary.expense),'투자 및 원금 상환 제외')}${card('투자 배분',money(summary.investment),'자산으로 이동하는 금액')}${card('예산 잔액',money(summary.budget_balance),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
-   html+=panel('수입 항목',table(incomeRows,['category','item','amount','note'],'budgets'),
-    `<button data-add="budgets" data-flow-type="income" ${writable?'':'disabled'}>+ 수입</button>`,
-    `수입 합계 ${money(summary.income)}${summary.income>0?' · 100%':''}`);
-   html+=panel('월별 예산 항목',table(expenseTotals,['category','amount','income_share']),'',
-    '소비·투자 배분·원금 상환의 수입 대비 비중입니다. 계좌 이체는 상세에서 확인할 수 있습니다.');
-   html+=panel('상세 예산 항목',`<div id="budget-filters">${budgetFilterButtons(rows)}</div>`+`<div id="budget-details" data-income="${esc(summary.income)}">${budgetDetailTable(rows,summary.income)}</div>`,
-    `<button data-action="copy" ${writable?'':'disabled'}>다른 월에서 복사</button>${button('budgets')}`,
-    '2차 금액은 직접 입력한 금액과 3차 항목의 합계입니다. 기존 금액을 나눌 때는 2차 금액도 함께 조정하세요.');
-   if (actualsEnabled) {
-    try {
-     const actuals=await api('/actual-transactions?month='+month);
-     const actualRows=actuals.items.map(row=>({...row,date:row.date.endsWith('-50')?row.date.slice(0,7)+' (일자 미확정)':row.date,item:row.description,note:row.memo}));
-     html+=panel('실제 수입·지출',table(actualRows,['date','flow_type','category','subcategory','item','amount','payment_method','note']),'',
-      actuals.filename?`실제 수입 ${money(actuals.totals.income)} · 실제 지출 ${money(actuals.totals.expense)} · 백업 ${actuals.filename}`:'설정에서 최신 ClevMoney 백업을 가져올 수 있습니다.');
-    } catch(err) {
-     html+=panel('실제 수입·지출',`<p class="error">${esc(err.message)}</p>`);
-    }
-   }
-   html+=panel('반복 예산 템플릿',table(recurring,['item','flow_type','day','amount','start_month','end_month','active'],'recurring-items'),button('recurring-items'),'반복 항목은 템플릿으로 저장됩니다. 월 예산에는 자동으로 더하지 않습니다.');
+   budgetView={rows,recurring,summary,...actual};
   } else if(page==='assets') {
    const [accounts, items, loans, snaps, debts, summary]=await Promise.all([getCollection('accounts'),getCollection('asset-items'),getCollection('liabilities'),getCollection('asset-snapshots'),getCollection('liability-snapshots'),api('/assets?date='+month+'-'+new Date(Number(year),Number(month.slice(5)),0).getDate())]);
    const k=summary.by_currency.KRW;
@@ -297,7 +322,7 @@ async function render(focusFilter=null) {
   }
   const preferences=page==='settings'?settings:await api('/settings');
   const displayName=preferences.items.find(r=>r.key==='display_name')?.value || '나의 재무';
-  if(sequence===loadSequence) {workspace.innerHTML=html;if(focusFilter) $('[data-filter='+focusFilter+']',workspace)?.focus();$('.brand > span:last-child').firstChild.nodeValue=displayName;}
+  if(sequence===loadSequence) {workspace.innerHTML=page==='budgets'?budgetPage(budgetView):html;if(focusFilter) $('[data-filter='+focusFilter+']',workspace)?.focus();$('.brand > span:last-child').firstChild.nodeValue=displayName;}
  } catch(e) {if(sequence===loadSequence)message(e.message,true);} finally {if(sequence===loadSequence){$('#loading').hidden=true;workspace.removeAttribute('aria-busy');}}
 }
 async function openEditor(resource, id, flowType, parent=null) {
@@ -390,10 +415,10 @@ workspace.addEventListener('click',async e=>{
   filters.budget[level]=el.dataset.all==='true'?null:el.value;
   filters.budget.fill(null,level+1);
   const controls=$('#budget-filters');
-  controls.innerHTML=budgetFilterButtons(collections.budgets);
+  controls.innerHTML=budgetFilterButtons(budgetView.rows);
   controls.querySelector(`[data-budget-filter="${level}"][aria-pressed="true"]`)?.focus();
   const details=$('#budget-details');
-  details.innerHTML=budgetDetailTable(collections.budgets,Number(details.dataset.income));
+  details.innerHTML=budgetDetailTable(budgetView.rows,budgetView.summary.income);
   return;
  }
  el.disabled=true;

@@ -435,26 +435,31 @@ def write_record(repo, rid, table, payload, method='POST', identifier=None, expe
     return repo.mutate(rid, [table, method, identifier, payload, expected_version], plan)
 
 
-def update_holding_amounts(repo, rid, rows):
-    table = 'holdings'
-    fields = {'holding_id', 'expected_version', 'cost_basis', 'market_value'}
+def update_amount_batch(repo, rid, table, rows):
+    dividends = table == 'dividends'
+    label = '배당' if dividends else '보유종목'
+    identifier_key = SCHEMA[table][0]
+    amounts = ('gross_amount', 'tax_amount') if dividends else ('cost_basis', 'market_value')
+    fields = {identifier_key, 'expected_version', *amounts}
     if not isinstance(rows, list) or not rows:
-        raise AppError('수정할 보유종목을 입력하세요.')
+        raise AppError(f'수정할 {label} 항목을 입력하세요.')
 
     def plan(raw, data):
-        holdings = {row['holding_id']: row for row in data[table]}
+        records = {row[identifier_key]: row for row in data[table]}
+        accounts = {account['account_id']: account for account in data['accounts']}
+        batch_account_id = None
         seen = set()
         operations = []
         stamp = now()
         for index, row in enumerate(rows, 1):
             try:
                 if not isinstance(row, dict) or set(row) != fields:
-                    raise AppError('종목 ID, 버전, 취득 원가와 평가액이 필요합니다.')
-                identifier = row['holding_id']
+                    raise AppError('항목 ID, 버전과 금액 필드가 필요합니다.')
+                identifier = row[identifier_key]
                 if not isinstance(identifier, str) or identifier in seen:
-                    raise AppError('유효한 종목 ID를 중복 없이 입력하세요.')
+                    raise AppError('유효한 항목 ID를 중복 없이 입력하세요.')
                 seen.add(identifier)
-                existing = holdings.get(identifier)
+                existing = records.get(identifier)
                 if existing is None:
                     raise AppError('항목을 찾을 수 없습니다.', 404, 'not_found')
                 version = row['expected_version']
@@ -462,10 +467,22 @@ def update_holding_amounts(repo, rid, rows):
                     raise AppError('다른 변경이 있습니다. 새로고침 후 다시 시도하세요.', 409, 'version_conflict')
                 assert_open(data, table, existing)
                 payload = {key: existing[key] for key in MODELS[table].model_fields}
-                payload.update(cost_basis=row['cost_basis'], market_value=row['market_value'])
+                payload.update({field: row[field] for field in amounts})
+                if dividends:
+                    account_id = existing['account_id']
+                    account = accounts.get(account_id)
+                    if not account or not (is_isa(account) or is_toss(account)) or '신투연금저축' in re.sub(r'\s+', '', account['name']):
+                        raise AppError('토스증권 또는 ISA 계좌만 일괄 수정할 수 있습니다.')
+                    if batch_account_id is not None and account_id != batch_account_id:
+                        raise AppError('한 계좌의 배당만 한 번에 수정할 수 있습니다.')
+                    batch_account_id = account_id
+                    gross, tax = (row[field] for field in amounts)
+                    if type(gross) is not int or type(tax) is not int:
+                        raise AppError('총배당과 세금은 정수여야 합니다.')
+                    payload['net_amount'] = gross - tax
                 record = validate_record(table, payload, data, existing)
             except AppError as exc:
-                raise AppError(f'{index}번째 보유종목: {exc}', exc.status, exc.code) from exc
+                raise AppError(f'{index}번째 {label}: {exc}', exc.status, exc.code) from exc
             updated = {**existing, **record, 'version': version + 1, 'updated_at': stamp}
             operations.append(operation(table, row_for(raw, table, identifier), updated))
         return [operations], {'updated': len(operations)}

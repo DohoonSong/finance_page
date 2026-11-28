@@ -203,9 +203,9 @@
  .dividend-batch-row { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
-.holding-batch-dialog { width: min(720px, 94vw); }
-.holding-batch-fields { grid-column: 1 / -1; }
-.holding-batch-row {
+.amount-batch-dialog { width: min(720px, 94vw); }
+.amount-batch-fields { grid-column: 1 / -1; }
+.amount-batch-row {
  display: grid;
  grid-template-columns: repeat(2, minmax(0, 1fr));
  gap: .45rem .7rem;
@@ -215,4 +215,7 @@
  margin: 0 0 .65rem;
  padding: .65rem;
 }
-.holding-batch-row > p { grid-column: 1 / -1; margin: 0; }
+.amount-batch-row > p { grid-column: 1 / -1; margin: 0; }
+
+.dividend-account-heading { display: flex; gap: .75rem; align-items: center; justify-content: space-between; margin-bottom: .5rem; }
+.dividend-account-heading > h3 { margin: 0; }

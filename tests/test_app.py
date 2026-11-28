@@ -457,3 +457,30 @@ def test_holding_amount_batch_is_atomic_and_idempotent(send, client):
     assert send('/holdings/batch', {'items': items}, 'PATCH', rid=rid).json == response.json
     assert [(row['cost_basis'], row['market_value'], row['version'], row['portfolio_group'])
             for row in records()] == [(0, 0, 2, '장기 투자'), (10, 20, 2, '장기 투자')]
+
+
+def test_dividend_amount_batch_is_account_scoped_and_atomic(send, client):
+    items = []
+    for name in ('토스증권', '토스 ISA', '신투연금저축'):
+        broker = add(send, 'accounts', name=name, type='brokerage', currency='KRW')
+        row = add(send, 'dividends', account_id=broker['account_id'], payment_date='2026-11-11',
+                  gross_amount=100, tax_amount=10, net_amount=90, currency='KRW', dividend_group='ISA')
+        items.append({'dividend_id': row['dividend_id'], 'expected_version': 1,
+                      'gross_amount': 80, 'tax_amount': 20})
+
+    def update(rows, rid=None):
+        return send('/dividends/batch', {'items': rows}, 'PATCH', rid=rid)
+
+    def records():
+        return client.get('/api/v1/dividends?year=2026').json['data']
+
+    for rejected in (items[:2], items[2:], [{**items[0], 'tax_amount': 81}]):
+        assert update(rejected).status_code == 422
+    assert all(row['net_amount'] == 90 and row['version'] == 1 for row in records())
+    rid = str(uuid4())
+    response = update(items[:1], rid)
+    assert response.json['data'] == {'updated': 1}
+    assert update(items[:1], rid).json == response.json
+    assert update(items[1:2]).status_code == 200
+    assert [(row['net_amount'], row['version'], row['dividend_group']) for row in records()] == [
+        (60, 2, 'ISA'), (60, 2, 'ISA'), (90, 1, 'ISA')]

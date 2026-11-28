@@ -288,14 +288,21 @@ function holdingTable(rows) {
  return table(visible,['date','account_id','portfolio_group','holding_name','symbol','cost_basis','market_value','currency'],'holdings')
   +paginationControls(holdingPage,pages,'holding-page','보유종목 페이지');
 }
+const hiddenDividendAccount = account => account?.name?.replace(/\s+/g,'').includes('신투연금저축');
+const editableDividendAccount = account => account && !hiddenDividendAccount(account)
+ && (tossAccount(account) || /(^|[^A-Z])ISA($|[^A-Z])/i.test(account.name));
+function dividendMonthRows(id, rows) {
+ const month=dividendAccountViews.get(id)?.month;
+ return month?rows.filter(row=>row.payment_date.startsWith(month)):rows;
+}
 function dividendAccountTable(id, rows) {
  const state=dividendAccountViews.get(id) || {month:'',page:1};
  const months=[...new Set(rows.map(row=>row.payment_date.slice(0,7)))].sort();
  if (!months.includes(state.month)) state.month='';
- const visible=state.month?rows.filter(row=>row.payment_date.startsWith(state.month)):rows;
+ dividendAccountViews.set(id,state);
+ const visible=dividendMonthRows(id,rows);
  const pages=Math.max(1,Math.ceil(visible.length/recordsPerPage));
  state.page=Math.min(state.page,pages);
- dividendAccountViews.set(id,state);
  const offset=(state.page-1)*recordsPerPage;
  const choices=[['','전체 월'],...months.map(month=>[month,Number(month.slice(5))+'월'])];
  const filters=`<div class="budget-filters" role="group" aria-label="지급 월">
@@ -314,7 +321,9 @@ function dividendAccountSections(rows) {
  }
  if (!groups.size) return empty('표시할 배당 내역이 없습니다.');
  return Array.from(groups,([id,entries])=>`<section class="dividend-account" data-dividend-account="${esc(id)}">
-   <h3>${esc(accountById(id)?.name || id)}</h3>
+   <div class="dividend-account-heading"><h3>${esc(accountById(id)?.name || id)}</h3>
+    ${editableDividendAccount(accountById(id))?`<button type="button" data-action="edit-dividend-amounts" ${writable?'':'disabled'}>수정</button>`:''}
+   </div>
    <div class="dividend-account-table">${dividendAccountTable(id,entries)}</div>
   </section>`).join('');
 }
@@ -598,7 +607,8 @@ async function render(focusFilter=null) {
    if (sequence!==loadSequence) return;
    const availableYears=[...new Set([currentYear,year,...years])].sort().reverse();
    dividendYear.replaceChildren(...availableYears.map(value=>new Option(value+'년',value,false,value===year)));
-   const scoped=rows.filter(row=>!filters.dividendGroup || row.dividend_group===filters.dividendGroup);
+   const scoped=rows.filter(row=>!hiddenDividendAccount(accountById(row.account_id))
+    && (!filters.dividendGroup || row.dividend_group===filters.dividendGroup));
    const symbols=uniqueOptions(scoped,'symbol');
    if (!symbols.includes(filters.dividendSymbol)) filters.dividendSymbol='';
    const detailFilters=`<div class="record-filters">
@@ -640,43 +650,46 @@ async function render(focusFilter=null) {
   }$('.brand > span:last-child').firstChild.nodeValue=displayName;}
  } catch(e) {if(sequence===loadSequence)message(e.message,true);} finally {if(sequence===loadSequence){$('#loading').hidden=true;workspace.removeAttribute('aria-busy');}}
 }
-function openHoldingBatch() {
- editor={batch:'holdings',rows:holdingVisible};
+function openAmountBatch(resource,rows,title) {
+ const dividends=resource==='dividends';
+ const amounts=dividends?['gross_amount','tax_amount']:['cost_basis','market_value'];
+ editor={batch:'amounts',resource,rows,amounts};
  $('#editor').classList.remove('dividend-batch-dialog');
- $('#editor').classList.add('holding-batch-dialog');
- $('#editor-title').textContent='보유종목 금액 일괄 수정';
+ $('#editor').classList.add('amount-batch-dialog');
+ $('#editor-title').textContent=title;
  $('#editor-error').textContent='';
- $('#editor-fields').innerHTML=`<div class="holding-batch-fields">
-  <p class="caption">현재 필터에 해당하는 스냅샷 ${editor.rows.length}건입니다. 기준일을 확인하고 바꿀 금액을 입력하세요.</p>
-  ${editor.rows.map((row,index)=>`<fieldset class="holding-batch-row" data-holding-index="${index}">
-   <legend>${esc(row.name)} (${esc(row.symbol)})</legend>
-   <p class="caption">${esc(row.date)} · ${esc(accountById(row.account_id)?.name || row.account_id)} · ${esc(row.currency)}</p>
-   ${['cost_basis','market_value'].map(key=>`<label>${labels[key]}<input name="${key}" type="number"
+ $('#editor-fields').innerHTML=`<div class="amount-batch-fields">
+  <p class="caption">현재 필터에 해당하는 ${rows.length}건입니다. ${dividends?'순배당은 총배당에서 세금을 빼서 계산합니다.':'기준일을 확인하고 바꿀 금액을 입력하세요.'}</p>
+  ${rows.map((row,index)=>`<fieldset class="amount-batch-row" data-amount-index="${index}">
+   <legend>${esc(dividends?(row.symbol || row.dividend_group || '배당'):`${row.name} (${row.symbol})`)}</legend>
+   <p class="caption">${esc(dividends?row.payment_date:row.date)} · ${esc(accountById(row.account_id)?.name || row.account_id)} · ${esc(row.currency)}</p>
+   ${amounts.map(key=>`<label>${labels[key]}<input name="${key}" type="number"
     min="0" max="9000000000000" step="1" value="${esc(row[key])}" required></label>`).join('')}
   </fieldset>`).join('')}
  </div>`;
  $('#editor').showModal();
 }
-async function saveHoldingBatch(form) {
+async function saveAmountBatch(form) {
+ const {resource,rows,amounts}=editor;
+ const idKey=idKeys[resource];
  const items=[];
- for (const fields of form.querySelectorAll('[data-holding-index]')) {
-  const row=editor.rows[Number(fields.dataset.holdingIndex)];
-  const cost_basis=$('[name="cost_basis"]',fields).valueAsNumber;
-  const market_value=$('[name="market_value"]',fields).valueAsNumber;
-  if (cost_basis!==Number(row.cost_basis) || market_value!==Number(row.market_value)) {
-   items.push({holding_id:row.holding_id,expected_version:Number(row.version),cost_basis,market_value});
+ for (const fields of form.querySelectorAll('[data-amount-index]')) {
+  const row=rows[Number(fields.dataset.amountIndex)];
+  const values=Object.fromEntries(amounts.map(key=>[key,$(`[name="${key}"]`,fields).valueAsNumber]));
+  if (amounts.some(key=>values[key]!==Number(row[key]))) {
+   items.push({[idKey]:row[idKey],expected_version:Number(row.version),...values});
   }
  }
  if (!items.length) {
   $('#editor-error').textContent='변경한 금액이 없습니다.';
   return;
  }
- const result=await api('/holdings/batch','PATCH',{items});
+ const result=await api('/'+resource+'/batch','PATCH',{items});
  $('#editor').close();
- message(`보유종목 ${result.updated}건을 수정했습니다.`);
+ message(`${titles[resource]} ${result.updated}건을 수정했습니다.`);
  await render();
 }
-$('#editor').addEventListener('close',()=>$('#editor').classList.remove('holding-batch-dialog'));
+$('#editor').addEventListener('close',()=>$('#editor').classList.remove('amount-batch-dialog'));
 function addDividendBatchRow() {
  const container=$('#dividend-batch-rows');
  const choices=collections.accounts.filter(account=>investmentAccount(account)
@@ -808,8 +821,8 @@ $('#editor-fields').addEventListener('click',e=>{
 $('#editor-form').addEventListener('submit',async e=>{
  e.preventDefault();const save=$('#editor-save');save.disabled=true;$('#editor-error').textContent='';
  try {
-  if (editor.batch==='holdings') {
-   await saveHoldingBatch(e.target);
+  if (editor.batch==='amounts') {
+   await saveAmountBatch(e.target);
    return;
   }
   if (editor.batch==='dividends') {
@@ -910,7 +923,13 @@ workspace.addEventListener('click',async e=>{
    if(parent) await openEditor('budgets',null,parent.flow_type,parent);
   }
   else if(el.dataset.action==='edit-holdings'){
-   if (!workspace.hasAttribute('aria-busy')) openHoldingBatch();
+   if (!workspace.hasAttribute('aria-busy')) openAmountBatch('holdings',holdingVisible,'보유종목 금액 일괄 수정');
+  }
+  else if(el.dataset.action==='edit-dividend-amounts'){
+   if (workspace.hasAttribute('aria-busy')) return;
+   const id=el.closest('[data-dividend-account]').dataset.dividendAccount;
+   const rows=dividendMonthRows(id,dividendVisible.filter(row=>row.account_id===id));
+   openAmountBatch('dividends',rows,accountById(id).name+' 배당 일괄 수정');
   }
   else if(el.dataset.action==='edit-asset-item'){
    const id=$('#asset-to-edit').value;

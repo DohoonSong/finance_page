@@ -11,7 +11,7 @@ from .actuals import download_latest, monthly_actuals, publish
 from .auth import login_required
 from .deployment import deployment_config
 from .schema import AppError
-from .services import (CATEGORY_TABLES, DIVIDEND_GROUPS, TOSS_CATEGORIES, asset_balance_groups, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, create_dividend_batch, date_value, dividend_summary, effective_closings, finalize, investment_rows, lease_budget, month_end, month_value, now, portfolio_summary, reopen, update_holding_amounts, visible_settings, write_record)
+from .services import (CATEGORY_TABLES, DIVIDEND_GROUPS, TOSS_CATEGORIES, asset_balance_groups, assets_summary, budget_rows, budget_summary, close_preview, copy_budget, create_dividend_batch, date_value, dividend_summary, effective_closings, finalize, investment_rows, lease_budget, month_end, month_value, now, portfolio_summary, reopen, update_amount_batch, visible_settings, write_record)
 from .store import GoogleSheets, operation
 
 bp = Blueprint('api', __name__, url_prefix='/api/v1')
@@ -86,7 +86,13 @@ def records(resource, identifier=None):
 @bp.patch('/holdings/batch')
 def holding_batch():
     value = body(('items',))
-    return ok(update_holding_amounts(repository(), g.request_id, value.get('items')))
+    return ok(update_amount_batch(repository(), g.request_id, 'holdings', value.get('items')))
+
+
+@bp.patch('/dividends/batch')
+def dividend_amount_batch():
+    value = body(('items',))
+    return ok(update_amount_batch(repository(), g.request_id, 'dividends', value.get('items')))
 
 
 @bp.post('/dividends/batch')

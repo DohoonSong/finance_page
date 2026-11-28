@@ -468,25 +468,33 @@ function budgetSpendingComposition(rows,summary) {
   groups[index].amount+=Number(row.amount);
   if (index===3) hasOther=true;
  }
- const visible=hasOther?groups:groups.slice(0,3);
- const totalSize=visible.reduce((sum,group)=>sum+Math.abs(group.amount),0);
- const rectangles=visible.filter(group=>group.amount!==0).map(group=>{
-  const share=Math.abs(group.amount)/totalSize;
-  return `<div class="spend-color-${group.color} ${group.amount<0?'spend-segment-negative':''}"
-   data-spend-share="${share}"></div>`;
- }).join('');
- const legend=visible.map(group=>{
-  const share=totalSize?percentage(Math.abs(group.amount)/totalSize):'—';
-  return `<li><span class="spend-swatch spend-color-${group.color}" aria-hidden="true"></span>
+ const income={name:'수입',color:'income',amount:summary.income};
+ const allocations=[
+  {name:'투자 배분',color:'investment',amount:summary.investment},
+  ...(hasOther?groups:groups.slice(0,3)),
+ ];
+ if (summary.debt_principal) allocations.push({name:'원금 상환',color:'debt',amount:summary.debt_principal});
+ allocations.push({name:'예산 잔액',color:'balance',amount:summary.budget_balance});
+ const visible=[income,...allocations];
+ const allocatedSize=allocations.reduce((sum,group)=>sum+Math.abs(group.amount),0);
+ const max=Math.max(Math.abs(income.amount),allocatedSize);
+ const bar=(label,entries)=>{
+  const size=entries.reduce((sum,group)=>sum+Math.abs(group.amount),0);
+  const rectangles=entries.filter(group=>group.amount!==0).map(group=>
+   `<div class="spend-color-${group.color} ${group.amount<0?'spend-segment-negative':''}"
+    data-spend-share="${Math.abs(group.amount)/max}"></div>`).join('');
+  const unused=max>size?`<div data-spend-share="${(max-size)/max}"></div>`:'';
+  return `<div class="spend-track"><span>${label}</span><div class="spend-composition" aria-hidden="true">${rectangles}${unused}</div></div>`;
+ };
+ const legend=visible.map(group=>`<li><span class="spend-swatch spend-color-${group.color}" aria-hidden="true"></span>
    <span>${group.name}</span><strong>${budgetValue(group.amount,summary.income)}</strong>
-   <span class="caption">소비 구성 ${share}</span></li>`;
- }).join('');
+   ${percentOnly()?'':`<span class="caption">수입 대비 ${percentage(incomeShare(group.amount,summary.income))}</span>`}</li>`).join('');
  const hint=visible.some(group=>group.amount<0)
-  ?'음수 묶음은 줄무늬로 표시하며, 너비는 금액의 절댓값 비중입니다.':'너비는 각 묶음의 소비 예산 비중입니다.';
- const chart=rectangles?`<div class="spend-composition" aria-hidden="true">${rectangles}</div>`
-  :'<p class="caption">비중을 표시할 소비 예산이 없습니다.</p>';
- return panel('소비 구성',chart+`<ul class="spend-legend">${legend}</ul>`,'',
-  `소비 예산 합계 ${budgetValue(summary.expense,summary.income)} · ${hint}`);
+  ?'두 막대는 같은 금액 척도입니다. 음수는 줄무늬와 절댓값 너비로 표시합니다.'
+  :'수입과 배분·잔액을 같은 금액 척도로 비교합니다.';
+ const chart=max?bar('수입 기준',[income])+bar('배분과 잔액',allocations)
+  :'<p class="caption">비중을 표시할 예산이 없습니다.</p>';
+ return panel('소비 구성',chart+`<ul class="spend-legend">${legend}</ul>`,'',hint);
 }
 function renderBudgetPage() {
  workspace.innerHTML=budgetPage(budgetView);
@@ -499,8 +507,7 @@ function budgetPage({rows, recurring, summary}) {
  const incomeRows=rows.filter(row=>row.flow_type==='income')
   .map(row=>({...row,income_share:incomeShare(row.amount,income)}));
  const expenseTotals=budgetCategoryTotals(rows.filter(isBudgetOutflow),income);
- let html=`<div class="cards budget-cards">${card('수입',budgetValue(income,income),'월 예산')}${card('투자 배분',budgetValue(summary.investment,income),'자산으로 이동하는 금액')}${card('예산 잔액',budgetValue(summary.budget_balance,income),'수입 − 소비 − 투자 − 원금 상환',true)}</div>`;
- html+=budgetSpendingComposition(rows,summary);
+ let html=budgetSpendingComposition(rows,summary);
  html+=panel('수입 항목',table(incomeRows,masked?['category','item','income_share']:['category','item','amount','note'],masked?null:'budgets'),
   masked?'':`<button data-add="budgets" data-flow-type="income" ${writable?'':'disabled'}>+ 수입</button>`,
   `수입 합계 ${budgetValue(income,income)}${!masked && income>0?' · 100%':''}`);

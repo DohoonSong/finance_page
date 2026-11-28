@@ -142,16 +142,25 @@
  margin-top: .75rem;
 }
 
-.budget-cards {
- grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr));
+.spend-track {
+ display: grid;
+ gap: .4rem;
+ margin-bottom: .8rem;
+ font-size: 13px;
+ font-weight: 600;
 }
 .spend-composition {
  display: flex;
- min-height: 3rem;
+ min-height: 2.5rem;
  overflow: hidden;
  border-radius: 8px;
+ background: #eef2f3;
 }
 .spend-composition > div { flex: 0 0 0%; min-width: 0; }
+.spend-color-income { background-color: #2a4b64; }
+.spend-color-investment { background-color: #247cac; }
+.spend-color-balance { background-color: #71833a; }
+.spend-color-debt { background-color: #a34f64; }
 .spend-color-fixed { background-color: #176b55; }
 .spend-color-giving { background-color: #6b4ab6; }
 .spend-color-living { background-color: #b45720; }
